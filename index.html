@@ -13,6 +13,7 @@
     :root { --paper:#111813; --card:#1A241D; --ink:#E8EFE9; --soft:#9DB0A3; --line:#2C3A30;
             --leaf:#58C48A; --leaf-ink:#0D1A12; --band:#0E2A1B; --hot:#FF6B5E; --warn-bg:#3A3016; --warn:#F2CF7A; } }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
   html { font-size:100%; } html[data-size="1"] { font-size:112.5%; } html[data-size="2"] { font-size:128%; }
   :root[data-contrast="1"] { --paper:#FFFFFF; --card:#FFFFFF; --ink:#000000; --soft:#1F1F1F; --line:#000000;
           --leaf:#004D26; --leaf-ink:#FFFFFF; --band:#000000; --tag:#FFE14D; --tag-ink:#000000; --hot:#B00000; --warn-bg:#FFE9A8; --warn:#000000; }
@@ -161,6 +162,8 @@
   dialog img { max-width:100%; max-height:70vh; display:block; margin:0 auto 10px; }
   dialog button { background:#fff; color:#17261C; border-color:#cfd8cd; }
 
+  .undo { margin:8px 0 0; padding:8px 10px; border-radius:7px; background:var(--warn-bg); color:var(--warn); font-weight:600; }
+  .undo button { color:inherit; font-weight:700; margin-left:6px; }
   /* friendlier layout */
   .start h2 { font-size:1.6rem; margin:0 0 4px; color:var(--ink); }
   .start { border-style:solid; border-width:1px; background:var(--card); }
@@ -341,6 +344,10 @@
       <button class="solid" id="addBtn"><span data-ic="plus"></span>Add</button>
     </div>
     <ul class="items" id="items"></ul>
+    <div class="row" id="clearRow" style="margin-top:8px">
+      <button class="small" id="clearBtn"><span data-ic="x"></span>Clear list</button>
+    </div>
+    <p class="undo" id="undoBar" hidden role="status"></p>
     <p class="soft" id="empty" style="margin:10px 0 0">Nothing on your list yet. Tap a regular below, or type your own.</p>
     <div class="staples" id="staples"></div>
     <details>
@@ -1055,6 +1062,7 @@ if (typeof document !== "undefined") {
       ? `<li><input type="text" id="editBox" value="${esc(it.q)}" aria-label="Edit item"></li>`
       : `<li><button class="name" data-edit="${i}" title="Click to edit">${esc(it.q)}</button><button class="del" data-del="${i}" title="Remove" aria-label="Remove ${esc(it.q)}">${ic("x")}</button></li>`).join("");
     $("empty").hidden = state.items.length > 0;
+    $("clearRow").hidden = !state.items.length;
     drawStaples();
     const box = $("editBox");
     if (box) {
@@ -1076,6 +1084,26 @@ if (typeof document !== "undefined") {
     $("newItem").value = ""; $("newItem").focus(); save(); drawList(); draw(); scheduleAuto();
   }
   $("addBtn").onclick = addItem;
+  /* Clear the whole list (and its results), with a few seconds to undo */
+  let undoTimer = null, undoData = null;
+  $("clearBtn").onclick = () => {
+    undoData = JSON.stringify({ items: state.items, last: state.last, got: state.got });
+    state.items = []; state.last = null; state.got = {}; allDeals = null;
+    answered.length = 0; skipped.clear(); itemOpen.clear(); pickOpen.clear(); expanded.clear();
+    save(); drawList(); draw(); drawCheckHint(); say("");
+    $("undoBar").innerHTML = `List cleared. <button class="link" id="undoBtn">${ic("undo")}Undo</button>`;
+    $("undoBar").hidden = false;
+    $("undoBtn").onclick = () => {
+      if (!undoData) return;
+      const u = JSON.parse(undoData); undoData = null;
+      state.items = u.items; state.last = u.last; state.got = u.got || {};
+      save(); drawList(); draw(); drawCheckHint();
+      $("undoBar").hidden = true; clearTimeout(undoTimer);
+    };
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { $("undoBar").hidden = true; undoData = null; }, 10000);
+    $("newItem").focus();
+  };
   $("newItem").onkeydown = e => { if (e.key === "Enter") addItem(); };
   $("items").onclick = e => {
     const t = e.target.closest("button"); if (!t) return;
