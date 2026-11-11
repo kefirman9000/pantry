@@ -93,6 +93,18 @@
   .line .what { flex:1; min-width:0; }
   .line .what b { display:block; }
   .line .tag.long { max-width:44%; text-align:right; }
+  .vs { display:block; font-size:.85rem; color:var(--soft); margin-top:2px; }
+  .vs b { display:inline; color:var(--leaf); font-weight:700; }
+  .cmp { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 14px; }
+  .cmp p { margin:0 0 6px; }
+  .cmp table { font-size:.92rem; }
+  .cmp td { padding:6px 8px 6px 0; }
+  .cmp tr.best td { font-weight:700; }
+  .cmp td.diff { white-space:nowrap; text-align:right; width:1%; }
+  .cmp td.bar { width:28%; min-width:70px; }
+  .cmp .barline { height:10px; border-radius:2px; background:var(--line); }
+  .cmp tr.best .barline { background:var(--hot); }
+  .cmp td.nm { color:var(--soft); font-weight:400; font-size:.86rem; }
   .toolbar { margin-top:16px; }
 
   /* one section per list item, offers cheapest first */
@@ -101,6 +113,19 @@
   .item .sum { margin:2px 0 12px; }
   .narrowit { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 14px; }
   .narrowit p { margin:0 0 8px; }
+  .narrowit h4 { margin:0 0 2px; font-size:1.05rem; }
+  .pickgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:10px; }
+  .pcard { position:relative; display:flex; flex-direction:column; gap:5px; border:1px solid var(--line); border-radius:8px;
+           padding:8px; cursor:pointer; background:var(--card); }
+  .pcard:has(input:checked) { border:2px solid var(--leaf); padding:7px; background:var(--paper); }
+  .pcard input { position:absolute; top:8px; left:8px; z-index:1; }
+  .pcard .pic { aspect-ratio:4/3; width:100%; pointer-events:none; }
+  .pcard .nm { font-size:.92rem; line-height:1.25; font-weight:600; }
+  .pcard .where { font-size:.82rem; color:var(--soft); line-height:1.3; }
+  .types { display:grid; gap:6px; margin-top:8px; }
+  .type { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+  .type .ex { flex:1 1 220px; font-size:.88rem; color:var(--soft); }
+  .type .ex b { color:var(--ink); }
   .kinds { display:flex; flex-wrap:wrap; gap:6px; }
   .kind { display:inline-flex; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
   .kind button { border:0; border-radius:0; background:none; padding:4px 10px; font-size:.92rem; }
@@ -170,7 +195,7 @@
       <summary>How to be specific</summary>
       <p class="soft" style="margin:8px 0 0">Put an exact phrase in quotes: <b>"large eggs"</b>.<br>
       Leave things out with a minus: <b>eggs -bites -organic</b>.<br>
-      Click an item to edit it. After a check, each item offers words and products to narrow it down, and Hide removes any deal that isn't what you meant.</p>
+      Click an item to edit it. After a check, each general item shows the matching products so you can tick the ones you mean, and Hide removes any deal that isn't what you meant.</p>
     </details>
   </div>
 
@@ -528,13 +553,21 @@ function kinds(q, offers) {
   const p = parseQuery(q);
   const skip = new Set([...p.include, ...p.exclude, ...p.phrases.flatMap(x => x.split(" "))]);
   offers.forEach(d => tokens(d.store).forEach(w => skip.add(w)));       // a store's own name says nothing about the product
-  const names = [...new Set(offers.map(d => d.name))], count = new Map();
-  names.forEach(n => new Set((n.toLowerCase().match(/[a-z]{3,}/g) || []).filter(w => !FILLER.has(w) && !IGNORED_WORDS.has(w)).map(w => [stem(w), w])
-    .filter(([k]) => !skip.has(k)).map(([k, w]) => k + "|" + w)).forEach(kw => {
-      const [k, w] = kw.split("|"); const e = count.get(k) || { word: w, n: 0 }; e.n++; count.set(k, e);
-    }));
-  return [...count.values()].filter(e => e.n < names.length)
-    .sort((a, b) => b.n - a.n || a.word.localeCompare(b.word)).slice(0, 10);
+  const names = [...new Set(offers.map(d => d.name))], groups = new Map();
+  names.forEach(n => {
+    const ws = new Map();
+    (n.toLowerCase().match(/[a-z]{3,}/g) || []).forEach(w => { const k = stem(w); if (!FILLER.has(w) && !IGNORED_WORDS.has(w) && !skip.has(k) && !ws.has(k)) ws.set(k, w); });
+    ws.forEach((w, k) => { const g = groups.get(k) || { word: w, names: [] }; g.names.push(n); groups.set(k, g); });
+  });
+  const min = 2;                                  // a word only one product has is just part of its name
+  const out = [], covered = [];
+  [...groups.values()].filter(g => g.names.length >= min && g.names.length < names.length)
+    .sort((a, b) => b.names.length - a.names.length || a.word.localeCompare(b.word))
+    .forEach(g => {                                   // skip a word that picks out exactly the same products as one already listed
+      const key = g.names.slice().sort().join("|");
+      if (!covered.includes(key)) { covered.push(key); out.push({ word: g.word, n: g.names.length, names: g.names }); }
+    });
+  return out.slice(0, 6);
 }
 
 /* What to show: only the chosen stores, minus products you hid, with the cheapest picked. */
@@ -761,6 +794,28 @@ if (typeof document !== "undefined") {
 
   /* ---- results */
   function current() { return view(state.last && state.last.results, state.items, selectedStores()); }
+  /* Each ticked store's lowest price for an item, cheapest first, and how far each is above the best. */
+  function compareOf(r, sel) {
+    const rows = sel.map(s => {
+      const list = r.stores[s] || [];
+      const d = list.find(x => x.unit_price !== null) || null;
+      return { store: s, d, has: list.length > 0 };
+    });
+    const priced = rows.filter(x => x.d).sort((a, b) => a.d.unit_price - b.d.unit_price);
+    const rest = rows.filter(x => !x.d);
+    const best = priced[0] ? priced[0].d.unit_price : null;
+    priced.forEach(x => { x.diff = Math.round((x.d.unit_price - best) * 100) / 100; });
+    const next = priced[1] || null;
+    return { priced, rest, next, save: next ? next.diff : null };
+  }
+  const money = n => "$" + n.toFixed(2);
+  function vsLine(c) {
+    if (!c.priced.length) return "";
+    if (!c.next) return `<span class="vs">Only store with a price for this in its ad</span>`;
+    if (c.save === 0) return `<span class="vs">Same price at ${esc(c.next.store)}</span>`;
+    const others = c.priced.slice(1, 4).map(x => `${esc(x.store)} ${money(x.d.unit_price)}`).join(", ");
+    return `<span class="vs"><b>Saves ${money(c.save)}</b> vs next best. Others: ${others}</span>`;
+  }
   function planOf(rows) {
     const plan = {};
     rows.forEach(r => { if (r.best) (plan[r.best.store] || (plan[r.best.store] = [])).push(r); });
@@ -787,9 +842,14 @@ if (typeof document !== "undefined") {
       <p class="soft" style="margin:0">Cheapest advertised price for each item. Ads checked ${esc(new Date(last.when).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }))}.</p>`;
     sel.filter(s => plan[s]).forEach(s => {
       h += `<h3 class="narrow">${esc(s)} <span>${plan[s].length} item${plan[s].length > 1 ? "s" : ""}</span></h3>` + plan[s].map(r =>
-        `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}</span></div>${tag(r.best)}</div>`).join("");
+        `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}</span>${vsLine(compareOf(r, sel))}</div>${tag(r.best)}</div>`).join("");
     });
     if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">No priced deals for your items at the stores you ticked.</p>`;
+    else {
+      const cs = rows.filter(r => r.best).map(r => compareOf(r, sel)).filter(c => c.save);
+      const total = cs.reduce((a, c) => a + c.save, 0);
+      if (total > 0.004) h += `<p style="margin:14px 0 0"><b>About ${money(total)} saved</b> <span class="soft">compared with buying each item at its next-cheapest store (one of each, advertised prices only).</span></p>`;
+    }
     const aside = (title, list, extra) => list.length ? `<p style="margin:14px 0 0"><b>${title}:</b> ${list.map(esc).join(", ")}${extra || ""}</p>` : "";
     h += aside("On sale, but the ad prints no price", unpriced);
     h += aside("Not in these stores' ads this week", missing);
@@ -809,6 +869,17 @@ if (typeof document !== "undefined") {
       h += `<section class="item noprint"><h3 class="narrow">${esc(r.item)}</h3>`;
       h += `<p class="sum soft">` + (r.best ? `Cheapest at ${esc(r.best.store)}. ${offers.length} matching deal${offers.length > 1 ? "s" : ""}, lowest price first.`
           : offers.length ? "On sale, but no price is printed in the ad." : "Every match is hidden.") + `</p>`;
+      // price by store: proof that the pick really is the lowest
+      const c = compareOf(r, sel);
+      if (c.priced.length > 1 || (c.priced.length && c.rest.length)) {
+        const top = c.priced.length ? c.priced[c.priced.length - 1].d.unit_price : 0;
+        h += `<div class="cmp"><p><b>Price by store</b> <span class="soft">Each store's lowest advertised price for this item.</span></p><div class="tablewrap"><table>` +
+          c.priced.map((x, i) => `<tr class="${i === 0 ? "best" : ""}"><td class="store">${esc(x.store)}</td><td class="p">${esc(money(x.d.unit_price))}</td>
+            <td class="bar"><div class="barline" style="width:${top ? Math.max(6, Math.round(x.d.unit_price / top * 100)) : 100}%"></div></td>
+            <td class="diff">${i === 0 ? "Lowest" : "+" + money(x.diff)}</td><td class="nm">${esc(x.d.name)}</td></tr>`).join("") +
+          c.rest.map(x => `<tr><td class="store">${esc(x.store)}</td><td class="soft" colspan="4">${x.has ? "On sale, no price printed in the ad" : "Not in this week's ad"}</td></tr>`).join("") +
+          `</table></div>` + (r.picked ? "" : `<p class="soft" style="margin:6px 0 0">Stores may be advertising different brands or sizes. To compare the same product, tick it in the list below.</p>`) + `</div>`;
+      }
       // which one do you mean? distinguishing words first, exact products behind a fold
       const products = [];
       r.pool.slice().sort(byPrice).forEach(d => {
@@ -818,13 +889,28 @@ if (typeof document !== "undefined") {
       });
       if (products.length >= 3) {
         const ks = kinds(r.item, r.pool), it = state.items[idx], only = new Set(it.only || []);
+        const what = parseQuery(r.item).search || r.item;
+        const cardsOf = list => `<div class="pickgrid">` + list.map(e => {
+          const st = [...e.stores];
+          return `<label class="pcard"><input type="checkbox" data-only="${idx}" data-name="${esc(e.name)}"${only.has(e.name.toLowerCase()) ? " checked" : ""} aria-label="${esc(e.name)}">
+            ${pic(e.d)}<span class="nm">${esc(e.name)}</span>
+            <span class="where">${e.d.unit_price !== null ? `<b>${esc(money(e.d.unit_price))}</b> at ${esc(e.d.store)}` : `At ${esc(e.d.store)}, no price printed`}${st.length > 1 ? `<br>Also at ${esc(st.filter(x => x !== e.d.store).join(", "))}` : ""}</span></label>`;
+        }).join("") + `</div>`;
         h += `<div class="narrowit">`;
-        if (ks.length) h += `<p><b>Which one do you mean?</b> <span class="soft">Pick a word to keep only those, or \u00d7 to leave them out.</span></p>
-          <div class="kinds">` + ks.map(k => `<span class="kind"><button data-kind="${idx}" data-word="${esc(k.word)}">${esc(k.word)} <small>${k.n}</small></button><button data-kind="${idx}" data-word="${esc(k.word)}" data-out="1" title="Leave out ${esc(k.word)}" aria-label="Leave out ${esc(k.word)}">&times;</button></span>`).join("") + `</div>`;
-        h += `<details data-pick="${esc(r.item)}"${pickOpen.has(r.item) ? " open" : ""}${ks.length ? "" : ` style="margin-top:0"`}>
-          <summary>${r.picked ? `Showing only the ${only.size} product${only.size > 1 ? "s" : ""} you ticked` : `Or tick the exact products you'd buy (${products.length} this week)`}</summary>
-          <div class="picks">` + products.map(e => `<label><input type="checkbox" data-only="${idx}" data-name="${esc(e.name)}"${only.has(e.name.toLowerCase()) ? " checked" : ""}>${pic(e.d, "mini")}<span class="nm">${esc(e.name)}</span><span class="soft">${e.d.unit_price !== null ? "from $" + e.d.unit_price.toFixed(2) : ""}${e.stores.size > 1 ? ", " + e.stores.size + " stores" : ""}</span></label>`).join("") + `</div>
-          ${only.size ? `<p class="soft" style="margin:8px 0 0"><button class="link" data-clearonly="${idx}">Clear my ticks</button></p>` : ""}</details>`;
+        if (r.picked) {
+          const mine = products.filter(e => only.has(e.name.toLowerCase()));
+          h += `<details data-pick="${esc(r.item)}"${pickOpen.has(r.item) ? " open" : ""} style="margin:0"><summary><b style="color:var(--ink)">Comparing only:</b> ${mine.map(e => esc(e.name)).join(", ")}. Change</summary>`
+            + cardsOf(products) + `<p class="soft" style="margin:8px 0 0"><button class="link" data-clearonly="${idx}">Compare every ${esc(what)} again</button></p></details>`;
+        } else {
+          const showAll = pickOpen.has(r.item), cap2 = 8;
+          h += `<h4>Which ${esc(what)} do you mean?</h4>
+            <p class="soft">This week's ads have ${products.length} different products matching \u201c${esc(what)}\u201d. Tick the ones you'd buy and only those are compared. Leave them all unticked to compare everything.</p>`
+            + cardsOf(showAll ? products : products.slice(0, cap2));
+          if (products.length > cap2) h += `<p style="margin:8px 0 0"><button class="link" data-allpicks="${esc(r.item)}">${showAll ? "Show fewer products" : `Show all ${products.length} products`}</button></p>`;
+          if (ks.length) h += `<p style="margin:14px 0 0"><b>Or narrow by type</b> <span class="soft">This also changes the item on your list, so it applies next week too.</span></p><div class="types">` +
+            ks.map(k => `<div class="type"><span class="kind"><button data-kind="${idx}" data-word="${esc(k.word)}" title="Keep only products with \u201c${esc(k.word)}\u201d">Only ${esc(k.word)}</button><button data-kind="${idx}" data-word="${esc(k.word)}" data-out="1" title="Leave out products with \u201c${esc(k.word)}\u201d">Not ${esc(k.word)}</button></span>
+              <span class="ex"><b>${k.n} product${k.n > 1 ? "s" : ""}:</b> ${k.names.slice(0, 3).map(esc).join("; ")}${k.n > 3 ? `; and ${k.n - 3} more` : ""}</span></div>`).join("") + `</div>`;
+        }
         if (r.stalePicks) h += `<p class="soft" style="margin:8px 0 0">The products you ticked before aren't in this week's ads, so every match is shown.</p>`;
         h += `</div>`;
       }
@@ -937,7 +1023,11 @@ if (typeof document !== "undefined") {
     const rows = current(), plan = planOf(rows), lines = [];
     selectedStores().filter(s => plan[s]).forEach(s => {
       lines.push(s.toUpperCase());
-      plan[s].forEach(r => lines.push(`- ${r.item}: ${r.best.price_label} (${r.best.name})`));
+      plan[s].forEach(r => {
+        const c = compareOf(r, selectedStores());
+        const vs = c.next ? (c.save ? ` - saves ${money(c.save)} vs ${c.next.store}` : ` - same at ${c.next.store}`) : "";
+        lines.push(`- ${r.item}: ${r.best.price_label} (${r.best.name})${vs}`);
+      });
       lines.push("");
     });
     const missing = rows.filter(r => !r.best).map(r => r.item);
@@ -964,6 +1054,7 @@ if (typeof document !== "undefined") {
     else if (t.dataset.do === "csv") exportMatches();
     else if (t.dataset.do === "csvall") exportAll();
     else if (t.dataset.kind !== undefined) refine(+t.dataset.kind, t.dataset.word, !!t.dataset.out);
+    else if (t.dataset.allpicks !== undefined) { pickOpen.has(t.dataset.allpicks) ? pickOpen.delete(t.dataset.allpicks) : pickOpen.add(t.dataset.allpicks); draw(); }
     else if (t.dataset.clearonly !== undefined) { const it = state.items[+t.dataset.clearonly]; if (it) { it.only = []; save(); draw(); } }
     else if (t.dataset.more !== undefined) { expanded.has(t.dataset.more) ? expanded.delete(t.dataset.more) : expanded.add(t.dataset.more); draw(); }
     else if (t.dataset.hide !== undefined) {
