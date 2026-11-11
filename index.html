@@ -238,6 +238,29 @@
   .shoptabs button .sdot { box-shadow:0 0 0 2px #fff; }
   .summary .schip { font-size:.95rem; vertical-align:.1em; }
 
+  /* the one-at-a-time question */
+  .choose { padding:20px; }
+  .qhead { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; }
+  .qnum { font-weight:700; color:var(--soft); font-size:.9rem; }
+  .qdots { display:flex; gap:5px; } .qdots i { width:9px; height:9px; border-radius:50%; background:var(--line); }
+  .qdots i.done { background:var(--leaf); } .qdots i.now { background:var(--tag); box-shadow:0 0 0 2px var(--ink); }
+  .choose h2 { font-size:1.9rem; line-height:1.1; margin:0 0 4px; }
+  .qgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(175px,1fr)); gap:14px; margin:16px 0 4px; }
+  .qcard { display:flex; flex-direction:column; gap:8px; text-align:left; padding:10px 10px 12px; border-radius:10px;
+           border:1px solid var(--line); border-top:5px solid var(--sc); background:var(--card); color:var(--ink); cursor:pointer; }
+  .qcard:hover { border-color:var(--sc); box-shadow:0 0 0 2px var(--sc); }
+  .qcard:focus-visible { outline:3px solid var(--sc); outline-offset:2px; }
+  .qpic { display:grid; place-items:center; aspect-ratio:4/3; background:#fff; border-radius:6px; overflow:hidden; }
+  .qpic img { width:100%; height:100%; object-fit:contain; }
+  .qname { font-weight:700; font-size:1rem; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .qprice .tag { font-size:1.35rem; }
+  .qprice .tag.long { font-size:1rem; }
+  .qstore { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+  .qstore small { color:var(--soft); font-size:.8rem; }
+  .qbar { margin-top:14px; }
+  .qbar button:not(.link) { font-size:1rem; padding:10px 16px; }
+  @media (max-width:560px) { .qgrid { grid-template-columns:1fr 1fr; gap:10px; } .choose h2 { font-size:1.55rem; } }
+
   /* header view controls */
   .view { display:flex; gap:6px; margin-top:8px; }
   .view button { background:transparent; color:#fff; border-color:rgba(255,255,255,.45); padding:4px 10px; font-size:.85rem; }
@@ -341,11 +364,14 @@
   <div class="panel">
     <h2 class="narrow">Which stores?</h2>
     <div class="checks" id="storeBoxes"></div>
-    <p class="soft" id="nearbyNote" style="margin:12px 0 6px"></p>
-    <div class="checks" id="nearbyBoxes"></div>
-    <details id="moreStores">
-      <summary id="otherSum">Other stores with ads</summary>
-      <div class="checks" id="otherBoxes" style="margin-top:8px"></div>
+    <p class="soft" id="nearbyNote" style="margin:12px 0 0"></p>
+    <details id="nearMore">
+      <summary id="nearSum">Add more stores near you</summary>
+      <div class="checks" id="nearbyBoxes" style="margin-top:8px"></div>
+      <details id="moreStores">
+        <summary id="otherSum">Other stores with ads</summary>
+        <div class="checks" id="otherBoxes" style="margin-top:8px"></div>
+      </details>
     </details>
     <div class="row" style="margin-top:12px">
       <input type="text" id="newStore" placeholder="Add a store by name" autocomplete="off" aria-label="Store name">
@@ -990,7 +1016,7 @@ if (typeof document !== "undefined") {
                    "apples", "coffee", "cereal", "rice", "pasta", "orange juice", "yogurt", "potatoes"];
   function drawStaples() {
     const have = new Set(state.items.map(i => i.q.toLowerCase()));
-    const left = STAPLES.filter(x => !have.has(x)).slice(0, 10);
+    const left = STAPLES.filter(x => !have.has(x)).slice(0, 6);
     $("staples").innerHTML = left.length ? `<span class="soft">Regulars:</span>` + left.map(x =>
       `<button data-staple="${esc(x)}" aria-label="Add ${esc(x)}">+ ${esc(x)}</button>`).join("") : "";
   }
@@ -1067,11 +1093,12 @@ if (typeof document !== "undefined") {
     $("nearbyBoxes").innerHTML = near.map(s => box(s, false)).join("");
     $("otherBoxes").innerHTML = other.map(s => box(s, false)).join("");
     $("moreStores").hidden = !other.length;
-    $("otherSum").textContent = `${other.length} other store${other.length === 1 ? "" : "s"} with ads (not all sell groceries)`;
-        $("nearbyNote").textContent = finding ? `Looking for stores near ${here()}\u2026`
+    $("otherSum").textContent = `${other.length} more that aren't mainly grocery stores`;
+    $("nearMore").hidden = !near.length && !other.length;
+    $("nearSum").textContent = `Add more stores near you (${near.length + other.length})`;
+    $("nearbyNote").textContent = finding ? `Looking for stores near ${here()}\u2026`
       : findNote ? findNote
-      : near.length ? `Also advertising groceries near ${here()}:`
-      : zipOk() ? "" : "Enter your ZIP code or town at the top and the stores near you appear here.";
+      : zipOk() ? "" : "Enter your ZIP code or town at the top to see stores near you.";
     $("nearbyNote").hidden = !$("nearbyNote").textContent;
   }
   function toggleStore(name, on) {
@@ -1237,7 +1264,7 @@ if (typeof document !== "undefined") {
           if (n) { out.status[st] = Object.assign({}, ps, { old: true }); filled.push({ store: st, when: prev.when }); }
         });
       }
-      state.got = {};
+      state.got = {}; answered.length = 0; skipped.clear();
       const sel0 = new Set(selectedStores()), nm = new Set(), names = [];
       out.deals.forEach(d => { const k = d.store + "|" + d.name; if (sel0.has(d.store) && !nm.has(k)) { nm.add(k); names.push([d.store, d.name]); } });
       const listWords = new Set(state.items.map(i => parseQuery(i.q).search.toLowerCase()));
@@ -1247,7 +1274,7 @@ if (typeof document !== "undefined") {
       save(); drawStores(); draw();
       const ask = current().filter(r => r.needsChoice).length;
       if (out.failedCompletely) autoFailedAt = Date.now();
-      say(out.failedCompletely ? "Couldn't get this week's ads." : ask ? `Done. Now pick which ones you want for ${ask} item${ask > 1 ? "s" : ""}.`
+      say(out.failedCompletely ? "Couldn't get this week's ads." : ask ? `Done. Answer ${ask === 1 ? "one quick question" : ask + " quick questions"} below.`
         : "Prices up to date as of " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".");
       if (!out.failedCompletely && !auto) $("output").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) { say("Something went wrong: " + err.message); }
@@ -1347,9 +1374,10 @@ if (typeof document !== "undefined") {
     if (!state.items.length) { $("shareOut").hidden = false; $("shareOut").value = "Add items to your list first."; return; }
     const pack = { v: 1, i: state.items.map(i => [i.q, i.only || [], i.hide || [], i.any ? 1 : 0]), z: state.zip, p: state.place, s: state.stores };
     const url = location.href.split("#")[0] + "#list=" + b64e(JSON.stringify(pack));
-    $("shareOut").hidden = false; $("shareOut").value = url; $("shareOut").select();
+    $("shareOut").value = url;
     let ok = false;
-    try { await navigator.clipboard.writeText(url); ok = true; } catch (e) { try { ok = document.execCommand("copy"); } catch (e2) {} }
+    try { await navigator.clipboard.writeText(url); ok = true; } catch (e) { try { $("shareOut").hidden = false; $("shareOut").select(); ok = document.execCommand("copy"); } catch (e2) {} }
+    $("shareOut").hidden = ok; if (!ok) { $("shareOut").hidden = false; $("shareOut").select(); }
     $("shareLabel").textContent = ok ? "Link copied. Open it on another device" : "Copy the link below";
     setTimeout(() => { $("shareLabel").textContent = "Copy a link to this list"; }, 2500);
   };
@@ -1437,22 +1465,36 @@ if (typeof document !== "undefined") {
         <span class="ex"><b>${k.n} product${k.n > 1 ? "s" : ""}:</b> ${k.names.slice(0, 3).map(esc).join("; ")}${k.n > 3 ? `; and ${k.n - 3} more` : ""}</span></div>`).join("") + `</div>` : "";
   }
   /* Step after the check: ask which product the shopper means, with every store's price shown */
+  /* One question at a time: "Which butterball turkey do you want?" Tap a card to choose it. */
+  const answered = [], skipped = new Set();
   function chooseHtml(list) {
-    let h = `<section class="choose"><h2 class="narrow">First, which ones do you want?</h2>
-      <p class="soft" style="margin:0 0 6px">${list.length === 1 ? "One item" : list.length + " items"} on your list could mean different products. Here is what each store has on sale.
-      Tick the ones you'd buy, then press <b>Compare</b>. Your choice is remembered for next week.</p>`;
-    list.forEach(({ r, idx }) => {
-      const it = state.items[idx], only = new Set(it.only || []), products = productsOf(r);
-      const showAll = pickOpen.has(r.item), cap = 12, ticked = products.filter(e => only.has(e.name.toLowerCase())).length;
-      h += `<div class="chooseitem"><h3 class="narrow">${esc(r.item)} <span class="soft">${products.length} choices, cheapest first</span></h3>`;
-      if (r.stalePicks) h += `<p class="soft" style="margin:0 0 6px">What you picked last time isn't on sale this week. Pick again, or choose \u201cAny is fine\u201d.</p>`;
-      h += cardsHtml(idx, showAll ? products : products.slice(0, cap), only, "choose");
-      if (products.length > cap) h += `<p style="margin:8px 0 0"><button class="link" data-allpicks="${esc(r.item)}">${showAll ? "Show fewer" : `Show all ${products.length}`}</button></p>`;
-      h += typesHtml(r, idx);
-      h += `<div class="row choosebar"><button class="solid" data-confirm="${idx}"${ticked ? "" : " disabled"}>${ticked ? ic("check") + `Compare ${ticked === 1 ? "this one" : "these " + ticked}` : "Tick one or more above"}</button>
-        <button data-any="${idx}">${ic("tag")}Any is fine, just find the cheapest</button></div></div>`;
-    });
-    return h + `</section>`;
+    const todo = list.filter(x => !skipped.has(x.r.item)), later = list.filter(x => skipped.has(x.r.item));
+    if (!todo.length) return `<section class="choose"><h2 class="narrow">You skipped ${later.length} question${later.length > 1 ? "s" : ""}</h2>
+      <p style="margin:0 0 12px">${later.map(x => esc(x.r.item)).join(", ")} won't be in your plan until you choose.</p>
+      <button class="solid big" data-unskip="1">${ic("swap")}Answer ${later.length > 1 ? "them" : "it"} now</button></section>`;
+    const { r, idx } = todo[0], products = productsOf(r), what = parseQuery(r.item).search || r.item;
+    const total = answered.length + list.length, n = answered.length + 1;
+    let h = `<section class="choose" aria-live="polite">
+      <div class="qhead"><span class="qnum">Question ${n} of ${total}</span>
+        <span class="qdots" aria-hidden="true">${Array.from({ length: total }, (_, i) => `<i class="${i < n - 1 ? "done" : i === n - 1 ? "now" : ""}"></i>`).join("")}</span></div>
+      <h2 class="narrow">Which ${esc(what)} do you want?</h2>
+      <p class="soft" style="margin:0 0 4px">Tap the one you'd buy. ${products.length} are on sale this week, cheapest first.</p>`;
+    if (r.stalePicks) h += `<p class="soft" style="margin:0 0 4px">What you picked last time isn't on sale this week.</p>`;
+    h += `<div class="qgrid">` + products.map(e => {
+      const st = [...e.stores], d = e.d;
+      return `<button class="qcard" style="${scss(d.store)}" data-pickone="${idx}" data-name="${esc(e.name)}">
+        <span class="qpic">${d.image ? `<img src="${esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</span>
+        <span class="qname">${esc(e.name)}</span>
+        <span class="qprice">${tag(d)}</span>
+        <span class="qstore">${chip(d.store)}${st.length > 1 ? `<small>also ${esc(st.filter(x => x !== d.store).join(", "))}</small>` : ""}</span>
+      </button>`;
+    }).join("") + `</div>
+      <div class="row qbar">
+        <button data-any="${idx}">${ic("tag")}Any of these is fine</button>
+        <button data-skip="${esc(r.item)}">Skip for now</button>
+        ${answered.length ? `<button class="link" data-back="1">${ic("undo")}Back</button>` : ""}
+      </div></section>`;
+    return h;
   }
   function joinAnd(a) { return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; }
   function summaryHtml(rows, plan, sel, choose, missing) {
@@ -1466,7 +1508,7 @@ if (typeof document !== "undefined") {
       const saved = planned.map(r => compareOf(r, sel)).reduce((a, c) => a + (c.save || 0), 0);
       parts.push(`About <b>${money(total)}</b> for one of each${saved > 0.004 ? `, saving about <b>${money(saved)}</b>` : ""}.`);
     }
-    if (choose.length) parts.push(`${choose.length} item${choose.length > 1 ? "s need" : " needs"} you to pick which one.`);
+    if (choose.length) parts.push(`${choose.length} question${choose.length > 1 ? "s" : ""} left to answer above.`);
     if (missing.length) parts.push(`${missing.length} ${missing.length > 1 ? "aren't" : "isn't"} on sale this week.`);
     return parts.length ? `<p class="summary">${parts.join(" ")}</p>` : "";
   }
@@ -1524,10 +1566,10 @@ if (typeof document !== "undefined") {
           <span class="vs">${vs} &middot; ${verify(r.best)}</span>${flagHtml(flagsOf(r.best, r))}</div>${tag(r.best)}</div>`;
       }).join("");
     });
-    if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">${choose.length ? "Pick which ones you want above, and the plan appears here." : "None of your items has a sale price at the stores you ticked this week."}</p>`;
+    if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">${choose.length ? "Answer the question above and your plan appears here." : "None of your items has a sale price at the stores you ticked this week."}</p>`;
 
     const note = (title, list, extra) => list.length ? `<p style="margin:12px 0 0"><b>${title}:</b> ${list.map(esc).join(", ")}${extra || ""}</p>` : "";
-    h += note("Waiting for you to pick which one (see above)", choose.map(x => x.r.item));
+    h += note("Waiting for your answer above", choose.map(x => x.r.item));
     h += note("Your usual pick isn't on sale this week, so other matches are shown", stale);
     h += note("On sale, but the ad doesn't print a price (tap the item below to see it)", unpriced);
     if (missing.length) {
@@ -1757,9 +1799,21 @@ if (typeof document !== "undefined") {
       save(); drawList(); draw(); scheduleAuto(200); say(`Added ${q} to your list.`);
       return;
     }
+    if (t.dataset.pickone !== undefined) {
+      const it = state.items[+t.dataset.pickone]; if (!it) return;
+      it.only = [t.dataset.name.toLowerCase()]; it.done = true; it.any = false; answered.push(it.q); save(); draw();
+      $("output").scrollIntoView({ behavior: "smooth", block: "start" }); return;
+    }
+    if (t.dataset.skip !== undefined) { skipped.add(t.dataset.skip); draw(); return; }
+    if (t.dataset.unskip !== undefined) { skipped.clear(); draw(); return; }
+    if (t.dataset.back !== undefined) {
+      const q = answered.pop(), it = state.items.find(i => i.q === q);
+      if (it) { it.only = []; it.any = false; it.done = undefined; save(); }
+      draw(); return;
+    }
     if (t.dataset.confirm !== undefined) { const it = state.items[+t.dataset.confirm]; if (it) { it.done = true; it.any = false; save(); draw(); } return; }
-    if (t.dataset.any !== undefined) { const it = state.items[+t.dataset.any]; if (it) { it.any = true; it.only = []; it.done = true; save(); draw(); } return; }
-    if (t.dataset.askagain !== undefined) { const it = state.items[+t.dataset.askagain]; if (it) { it.any = false; it.only = []; it.done = undefined; itemOpen.delete(it.q); save(); draw();
+    if (t.dataset.any !== undefined) { const it = state.items[+t.dataset.any]; if (it) { it.any = true; it.only = []; it.done = true; answered.push(it.q); save(); draw(); } return; }
+    if (t.dataset.askagain !== undefined) { const it = state.items[+t.dataset.askagain]; if (it) { if (!current().some(x => x.needsChoice)) answered.length = 0; else { const k = answered.indexOf(it.q); if (k >= 0) answered.splice(k, 1); } it.any = false; it.only = []; it.done = undefined; itemOpen.delete(it.q); save(); draw();
       $("output").scrollIntoView({ behavior: "smooth", block: "start" }); } return; }
     if (t.dataset.zoom) {
       $("zoom").querySelector("img").src = t.dataset.zoom; $("zoomCap").textContent = t.dataset.cap || "";
