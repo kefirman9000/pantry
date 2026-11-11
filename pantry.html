@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pantry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
+<style>
+  :root { --paper:#EEF3EC; --card:#FFFFFF; --ink:#17261C; --soft:#55665B; --line:#D3DDD1;
+          --leaf:#1E6B43; --leaf-ink:#FFFFFF; --band:#14432B; --tag:#FFD83D; --tag-ink:#1B1A0F;
+          --hot:#D8342A; --warn-bg:#FFF1C2; --warn:#6B4A00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper:#111813; --card:#1A241D; --ink:#E8EFE9; --soft:#9DB0A3; --line:#2C3A30;
+            --leaf:#58C48A; --leaf-ink:#0D1A12; --band:#0E2A1B; --hot:#FF6B5E; --warn-bg:#3A3016; --warn:#F2CF7A; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+         font:16px/1.45 Archivo,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .narrow { font-stretch:68%; font-weight:800; letter-spacing:.005em; }
+  .soft { color:var(--soft); font-size:.9rem; }
+
+  /* top band: the one action that matters lives here */
+  header { background:var(--band); color:#fff; }
+  .band { max-width:1200px; margin:0 auto; padding:18px 16px; display:flex; gap:14px 28px;
+          flex-wrap:wrap; align-items:center; justify-content:space-between; }
+  h1 { margin:0; font-size:2.1rem; line-height:1; }
+  header p { margin:4px 0 0; color:#C9DBCF; font-size:.95rem; }
+  .go { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .go label { color:#C9DBCF; font-size:.9rem; }
+  #zip { width:96px; background:#fff; color:#17261C; border-color:transparent; font-weight:600; }
+  #checkBtn { background:var(--tag); color:var(--tag-ink); border-color:var(--tag); font-weight:700; padding:10px 18px; }
+  #status { max-width:1200px; margin:0 auto; padding:0 16px 12px; color:#C9DBCF; font-size:.9rem; min-height:1.2em; }
+
+  .layout { max-width:1200px; margin:0 auto; padding:22px 16px 60px; display:grid;
+            grid-template-columns:310px minmax(0,1fr); gap:26px; align-items:start; }
+  @media (max-width:860px) { .layout { grid-template-columns:minmax(0,1fr); } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  h2 { margin:0 0 10px; font-size:1.25rem; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input[type=text] { font:inherit; color:inherit; background:var(--paper); border:1px solid var(--line);
+          border-radius:7px; padding:8px 10px; min-width:0; }
+  :focus-visible { outline:2px solid var(--leaf); outline-offset:2px; }
+  header :focus-visible { outline-color:var(--tag); }
+  #newItem, #newStore, #browseFilter { flex:1 1 140px; }
+  button { font:inherit; cursor:pointer; border-radius:7px; padding:8px 14px;
+           border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  button.solid { background:var(--leaf); border-color:var(--leaf); color:var(--leaf-ink); font-weight:600; }
+  button.small { padding:6px 11px; font-size:.88rem; }
+  button.link { border:0; background:none; padding:0; color:var(--soft); font-size:.85rem; text-decoration:underline; }
+  button:disabled { opacity:.6; cursor:wait; }
+  ul.items { list-style:none; margin:12px 0 0; padding:0; }
+  ul.items li { display:flex; align-items:center; border-top:1px solid var(--line); }
+  ul.items .name { flex:1; text-align:left; border:0; background:none; padding:8px 2px; border-radius:4px; }
+  ul.items .del { border:0; background:none; padding:4px 8px; color:var(--soft); font-size:1.1rem; }
+  ul.items input { flex:1; margin:4px 0; }
+  .checks { display:grid; gap:6px; }
+  .checks label { display:flex; gap:8px; align-items:center; }
+  input[type=checkbox] { accent-color:var(--leaf); width:16px; height:16px; }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--soft); font-size:.92rem; }
+  label.relay { display:flex; gap:8px; align-items:flex-start; margin-top:10px; }
+  .warn { background:var(--warn-bg); color:var(--warn); border-radius:8px; padding:9px 12px; margin-bottom:10px; font-size:.93rem; }
+  .start { border:2px dashed var(--line); border-radius:10px; padding:34px 22px; color:var(--soft); }
+  .start b { color:var(--ink); }
+
+  /* the shelf tag: every price on the page wears one */
+  .tag { display:inline-block; background:var(--tag); color:var(--tag-ink); font-stretch:68%; font-weight:800;
+         font-size:1.55rem; line-height:1; padding:6px 9px 5px; border-radius:3px; white-space:nowrap; }
+  .tag.long { font-size:1.05rem; white-space:normal; line-height:1.15; }
+  .tag.none { background:none; border:1px dashed var(--line); color:var(--soft); font-weight:600; font-size:.95rem; }
+
+  /* pictures from the ad */
+  .pic { display:grid; place-items:center; background:#fff; border:1px solid var(--line); border-radius:6px;
+         padding:0; overflow:hidden; cursor:zoom-in; color:#8a958d; font-size:.8rem; }
+  .pic img { width:100%; height:100%; object-fit:contain; display:block; }
+  .pic:empty { cursor:default; }
+  .pic:empty::after { content:"No picture"; }
+  .pic.thumb { width:54px; height:54px; flex:none; }
+  .pic.thumb:empty::after { content:""; }
+  .pic.mini { width:38px; height:38px; }
+  .pic.mini:empty::after { content:""; }
+
+  /* where to buy */
+  .trip { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:26px; }
+  .trip h2 { font-size:1.7rem; margin-bottom:2px; }
+  .trip h3 { margin:18px 0 0; font-size:1.2rem; display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+             border-bottom:2px solid var(--ink); padding-bottom:4px; }
+  .trip h3 span { font-size:.88rem; font-weight:400; font-stretch:100%; color:var(--soft); }
+  .line { display:flex; gap:12px; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); }
+  .line .what { flex:1; min-width:0; }
+  .line .what b { display:block; }
+  .line .tag.long { max-width:44%; text-align:right; }
+  .toolbar { margin-top:16px; }
+
+  /* one section per list item, offers cheapest first */
+  .item { margin-bottom:30px; }
+  .item h3 { margin:0; font-size:1.55rem; line-height:1.1; }
+  .item .sum { margin:2px 0 12px; }
+  .offers { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:14px 12px; }
+  .offer { position:relative; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px;
+           display:flex; flex-direction:column; gap:7px; }
+  .offer.win { border:2px solid var(--hot); padding:16px 9px 9px; }
+  .flag { position:absolute; top:-11px; left:9px; background:var(--hot); color:#fff; font-weight:700; font-size:.8rem;
+          padding:2px 8px; border-radius:3px; }
+  .offer .pic { aspect-ratio:4/3; width:100%; }
+  .offer .store { font-weight:700; }
+  .offer .prod { font-size:.92rem; line-height:1.3; }
+  .offer .foot { margin-top:auto; display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .was { text-decoration:line-through; }
+
+  table { width:100%; border-collapse:collapse; font-size:.93rem; }
+  td { padding:6px 8px 6px 0; border-top:1px solid var(--line); vertical-align:middle; }
+  td.store { white-space:nowrap; font-weight:600; } td.p { white-space:nowrap; font-weight:700; }
+  .tablewrap { overflow-x:auto; }
+  pre { white-space:pre-wrap; word-break:break-all; font-size:.78rem; background:var(--paper); padding:10px; border-radius:6px; }
+
+  dialog { border:0; border-radius:10px; padding:14px; max-width:min(92vw,640px); background:#fff; color:#17261C; }
+  dialog::backdrop { background:rgba(10,20,14,.6); }
+  dialog img { max-width:100%; max-height:70vh; display:block; margin:0 auto 10px; }
+  dialog button { background:#fff; color:#17261C; border-color:#cfd8cd; }
+
+  @media print {
+    body { background:#fff; color:#000; }
+    header, aside, .noprint, .toolbar { display:none !important; }
+    .layout { display:block; padding:0; } .trip { border:0; padding:0; }
+    .tag { border:1px solid #000; background:none; }
+  }
+</style></head><body>
+<header>
+  <div class="band">
+    <div>
+      <h1 class="narrow">Pantry</h1>
+      <p>This week's store ads, checked against your list.</p>
+    </div>
+    <div class="go">
+      <label for="zip">Store ZIP code</label>
+      <input type="text" id="zip" inputmode="numeric" maxlength="5" placeholder="27601">
+      <button id="checkBtn">Check this week's ads</button>
+    </div>
+  </div>
+  <div id="status" role="status"></div>
+</header>
+
+<div class="layout">
+<aside>
+  <div class="panel">
+    <h2 class="narrow">Your list</h2>
+    <div class="row">
+      <input type="text" id="newItem" placeholder="Add an item" autocomplete="off" aria-label="Add an item">
+      <button class="solid" id="addBtn">Add</button>
+    </div>
+    <ul class="items" id="items"></ul>
+    <p class="soft" id="empty" style="margin:10px 0 0">Nothing on your list yet. Try "chicken breast".</p>
+    <details>
+      <summary>How to be specific</summary>
+      <p class="soft" style="margin:8px 0 0">Put an exact phrase in quotes: <b>"large eggs"</b>.<br>
+      Leave things out with a minus: <b>eggs -bites -organic</b>.<br>
+      Click an item to edit it. Use Hide on any deal that isn't what you meant.</p>
+    </details>
+  </div>
+
+  <div class="panel">
+    <h2 class="narrow">Stores</h2>
+    <div class="checks" id="storeBoxes"></div>
+    <details id="moreStores">
+      <summary>Add other stores near you</summary>
+      <p class="soft" id="nearbyNote" style="margin:10px 0 8px"></p>
+      <div class="checks" id="nearbyBoxes"></div>
+      <div class="row" style="margin-top:12px">
+        <input type="text" id="newStore" placeholder="Store name, e.g. Aldi" autocomplete="off" aria-label="Store name">
+        <button class="small" id="addStoreBtn">Add store</button>
+      </div>
+      <button class="small" id="findBtn" style="margin-top:8px">Find stores near my ZIP</button>
+    </details>
+  </div>
+
+  <div class="panel">
+    <details style="margin:0">
+      <summary>Trouble loading ads?</summary>
+      <label class="relay soft">
+        <input type="checkbox" id="relay">
+        <span>Use a relay. Some browsers block a page on your computer from reading the ad service directly.
+        Ticking this sends each lookup (your ZIP code and item names) through a free third-party relay,
+        allorigins.win, which can be slow or occasionally down.</span>
+      </label>
+    </details>
+  </div>
+</aside>
+
+<main id="output"></main>
+</div>
+
+<dialog id="zoom"><img alt=""><p id="zoomCap" style="margin:0 0 10px"></p><button id="zoomClose">Close</button></dialog>
+<script>
+"use strict";
+/* ---------------------------------------------------------------- settings */
+const DEFAULTS = { "Harris Teeter": "harristeeter", "Lowes Foods": "lowesfoods",
+                   "Food Lion": "foodlion", "Target": "target" };
+const DEFAULT_STORES = Object.keys(DEFAULTS);
+const API = "https://backflipp.wishabi.com/flipp";   // Flipp: hosts stores' digital weekly ads
+const RELAY = "https://api.allorigins.win/raw?url=";
+const MAX_FLYERS_PER_STORE = 6;
+const IGNORED_WORDS = new Set(["a", "an", "the", "of", "and", "or", "for", "with"]);
+let useRelay = false;
+
+/* ------------------------------------------------------- fetching the ads */
+async function getJson(url) {
+  let r;
+  try { r = await fetch(useRelay ? RELAY + encodeURIComponent(url) : url); }
+  catch (e) { const err = new Error("blocked or no connection"); err.blocked = true; throw err; }
+  if (!r.ok) throw new Error("error " + r.status);
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error("unreadable reply (“" + text.slice(0, 50).replace(/\s+/g, " ") + "”)"); }
+}
+const squash = t => String(t ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+/* One tidy name per store. The four built-in stores also match longer variants of their name. */
+function storeName(merchant) {
+  const s = squash(merchant);
+  if (!s) return null;
+  for (const d of DEFAULT_STORES) if (s === DEFAULTS[d] || s.startsWith(DEFAULTS[d])) return d;
+  return String(merchant).replace(/\s+/g, " ").trim();
+}
+async function fetchFlyers(zip) {
+  const data = await getJson(`${API}/flyers?locale=en-us&postal_code=${encodeURIComponent(zip)}`);
+  const list = Array.isArray(data) ? data : (data && data.flyers) || [];
+  const out = [];
+  for (const f of list) {
+    if (!f || typeof f !== "object" || f.id == null) continue;
+    const store = storeName(f.merchant || f.merchant_name);
+    if (store) out.push({ id: String(f.id), store, valid_from: f.valid_from, valid_to: f.valid_to });
+  }
+  return out;
+}
+async function fetchFlyerItems(id) {
+  const data = await getJson(`${API}/flyers/${id}?locale=en-us`);
+  const items = Array.isArray(data) ? data : (data && data.items) || [];
+  return items.filter(i => i && typeof i === "object");
+}
+async function fetchSearch(zip, q) {
+  const data = await getJson(`${API}/items/search?locale=en-us&postal_code=${encodeURIComponent(zip)}&q=${encodeURIComponent(q)}`);
+  return ((data && data.items) || []).filter(i => i && typeof i === "object");
+}
+const safe = p => p.then(v => [v, null], e => [[], e]);
+
+/* --------------------------------------------------- understanding a deal */
+function toFloat(v) {
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  const m = String(v ?? "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+function picture(raw) {
+  for (const k of ["clean_image_url", "clipping_image_url", "cutout_image_url", "image_url", "large_image_url", "thumbnail_url"]) {
+    const u = String(raw[k] || "").trim().replace(/^http:\/\//i, "https://");
+    if (/^https:\/\/[^\s"'<>]+$/i.test(u)) return u;
+  }
+  return "";
+}
+function makeDeal(raw, store, validFrom, validTo) {
+  const name = String(raw.name || raw.display_name || "").trim();
+  if (!name) return null;
+  let price = toFloat(raw.current_price);
+  if (price === null) price = toFloat(raw.price);
+  if (price !== null && price <= 0) price = null;
+  const pre = String(raw.pre_price_text || "").trim();
+  const post = String(raw.post_price_text || "").trim();
+  const story = String(raw.sale_story || "").trim();
+  const was = toFloat(raw.original_price);
+
+  const fine = [];                                   // any other wording the ad attaches to the price
+  for (const k in raw) {
+    if (!/pre_price|post_price|price_text|sale_story|disclaimer|description|dollars_off|percent_off/.test(k)) continue;
+    const v = typeof raw[k] === "string" ? raw[k].replace(/\s+/g, " ").trim() : "";
+    if (v && v !== name && !fine.includes(v)) fine.push(v);
+  }
+
+  let unit = price, qty = 1;                         // "2/$5" or "2 for $5" -> price for one
+  const multi = pre.match(/(\d+)\s*(?:\/|for)\s*$/i);
+  if (multi) qty = +multi[1];
+  else if (price !== null) for (const t of fine) {
+    const m = t.match(/(\d+)\s*(?:\/|for)\s*\$\s*(\d+(?:\.\d+)?)/i);
+    if (m && Math.abs(parseFloat(m[2]) - price) < 0.005) { qty = +m[1]; break; }
+  }
+  if (price !== null && qty > 1) unit = Math.round(price / qty * 100) / 100;
+
+  let label;
+  if (price !== null) {
+    const lead = qty > 1 && !multi ? qty + "/" : pre;
+    label = lead + (lead && !/[\/$]$/.test(lead) ? " " : "") + `$${price.toFixed(2)}` + (post ? ` ${post}` : "");
+    if (unit !== price) label += ` ($${unit.toFixed(2)} each)`;
+  } else label = story || "See ad for price";
+
+  return { store, name, unit_price: unit, price_label: label.trim(), sale_story: story,
+           was: was !== null && price !== null && was > price ? was : null,
+           valid_from: String(raw.valid_from || validFrom || ""),
+           valid_to: String(raw.valid_to || validTo || ""),
+           image: picture(raw),
+           fine: fine.filter(t => t !== story && t !== pre && t !== post).join(" | ").slice(0, 300),
+           _text: [raw.name, raw.brand, raw.description].map(x => x || "").join(" ") };
+}
+
+/* ------------------------------------------------ matching your list items */
+function stem(w) {
+  if (w.length > 4 && w.endsWith("ies")) return w.slice(0, -3) + "y";
+  if (w.length > 4 && /(ches|shes|xes|oes)$/.test(w)) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
+  return w;
+}
+const tokens = t => (String(t).toLowerCase().match(/[a-z0-9]+/g) || []).map(stem);
+/* eggs -bites "large brown"  ->  must have: egg + the phrase "large brown"; must not have: bite */
+function parseQuery(q) {
+  const p = { include: [], phrases: [], exclude: [], search: "" };
+  const plain = [];
+  let rest = String(q).replace(/(^|\s)(-?)["“”]([^"“”]+)["“”]/g, (m, sp, neg, phrase) => {
+    const t = tokens(phrase).join(" ");
+    if (t) { (neg ? p.exclude : p.phrases).push(t); if (!neg) plain.push(phrase.trim()); }
+    return " ";
+  });
+  rest.split(/\s+/).filter(Boolean).forEach(tok => {
+    if (tok[0] === "-" && tok.length > 1) p.exclude.push(...tokens(tok.slice(1)));
+    else { p.include.push(...tokens(tok).filter(w => !IGNORED_WORDS.has(w))); plain.push(tok); }
+  });
+  p.search = plain.join(" ").replace(/\s+/g, " ").trim();
+  return p;
+}
+function matches(p, deal) {
+  if (!p.include.length && !p.phrases.length) return false;
+  const norm = deal._norm || (deal._norm = " " + tokens(deal._text).join(" ") + " ");
+  const has = t => norm.includes(" " + t + " ");
+  return p.include.every(has) && p.phrases.every(has) && !p.exclude.some(has);
+}
+const byPrice = (a, b) => (a.unit_price === null) - (b.unit_price === null)
+  || (a.unit_price - b.unit_price) || a.name.localeCompare(b.name);
+
+/* --------------------------------------------- reading the ads for a check */
+async function checkPrices(zip, queries, selected) {
+  const sel = new Set(selected);
+  const warnings = [], deals = [], seen = new Set(), nearby = new Set(), status = {};
+  const st = s => status[s] || (status[s] = { items: 0, valid_to: "" });
+  let failed = 0, attempted = 0, blocked = 0;
+  const details = new Set();
+  const note = (what, err) => { failed++; if (err.blocked) blocked++; details.add(what + ": " + err.message); };
+  const add = d => {
+    if (!d) return;
+    const key = d.store + "|" + d.name.toLowerCase() + "|" + d.unit_price;
+    if (seen.has(key)) return;
+    seen.add(key); deals.push(d); nearby.add(d.store);
+    const s = st(d.store); s.items++;
+    if (d.valid_to > s.valid_to) s.valid_to = d.valid_to;
+  };
+
+  // 1) The list of this week's ads near the ZIP, then each chosen store's full ad.
+  attempted++;
+  const [flyers, err] = await safe(fetchFlyers(zip));
+  let fullAdsFailed = !!err;
+  if (err) note("list of ads", err);
+  flyers.forEach(f => nearby.add(f.store));
+  const perStore = {}, jobs = [];
+  let sample = null;
+  flyers.forEach(f => {
+    if (!sel.has(f.store)) return;
+    perStore[f.store] = (perStore[f.store] || 0) + 1;
+    if (perStore[f.store] <= MAX_FLYERS_PER_STORE) jobs.push(f);
+  });
+  async function readFlyers(list) {
+    attempted += list.length;
+    const fetched = await Promise.all(list.map(f => safe(fetchFlyerItems(f.id))));
+    list.forEach((f, i) => {
+      const [rows, e] = fetched[i];
+      if (e) { note("full ad", e); fullAdsFailed = true; return; }
+      if (!sample && rows.length) sample = rows.find(x => x.price || x.current_price) || rows[0];
+      rows.forEach(raw => add(makeDeal(raw, f.store, f.valid_from, f.valid_to)));
+    });
+  }
+  await readFlyers(jobs);
+
+  // 2) Ask the ad search for each item (this returns deals from every store nearby).
+  const parsed = queries.map(parseQuery);
+  attempted += queries.length;
+  const searched = await Promise.all(parsed.map(p => safe(fetchSearch(zip, p.search))));
+  const seenFlyers = new Set(jobs.map(f => f.id)), more = [];
+  searched.forEach(([rows, e]) => {
+    if (e) { note("item search", e); return; }
+    rows.forEach(raw => {
+      const store = storeName(raw.merchant_name || raw.merchant);
+      if (!store) return;
+      add(makeDeal(raw, store));
+      const fid = raw.flyer_id == null ? "" : String(raw.flyer_id);
+      if (fid && sel.has(store) && !seenFlyers.has(fid) && more.length < 16) {
+        seenFlyers.add(fid); more.push({ id: fid, store, valid_from: raw.valid_from, valid_to: raw.valid_to });
+      }
+    });
+  });
+
+  // 3) Read in full any chosen store's ad that the search pointed to and step 1 missed.
+  await readFlyers(more);
+
+  const embedded = typeof window !== "undefined" && window.top !== window.self;
+  const why = " (" + [...details].join("; ") + ")";
+  if (!deals.length && failed === attempted) {
+    warnings.push(embedded
+      ? "This page is running inside a preview, which can't reach the ad service. Download the file and open it directly in your browser (Chrome, Edge, Safari or Firefox)." + why
+      : blocked
+        ? (useRelay ? "Couldn't reach the ad service through the relay either. Check your internet connection and try again in a few minutes." + why
+                    : "Your browser couldn't read the ad service (or you're offline). Open “Having trouble loading ads?” above, tick the relay option, and try again." + why)
+        : (useRelay ? "The relay returned errors for every lookup. Untick the relay option under “Having trouble loading ads?” and try again." + why
+                    : "The ad service returned errors for every lookup." + why));
+  } else if (fullAdsFailed) {
+    warnings.push("Couldn't download every store's full ad, so some results come from the item search only and may miss a few deals." + why);
+  }
+
+  // 4) Match the list against everything that was read, at every store.
+  const results = queries.map((item, i) => {
+    const stores = {};
+    deals.forEach(d => { if (matches(parsed[i], d)) (stores[d.store] || (stores[d.store] = [])).push(d); });
+    Object.values(stores).forEach(l => l.sort(byPrice));
+    return { item, stores };
+  });
+  return { results, deals, status, warnings, sample, nearby: [...nearby].sort((a, b) => a.localeCompare(b)),
+           failedCompletely: !deals.length && failed === attempted };
+}
+
+/* What to show: only the chosen stores, minus products you hid, with the cheapest picked. */
+function view(results, items, selected) {
+  return items.map(it => {
+    const r = (results || []).find(x => x.item === it.q);
+    if (!r) return { item: it.q, pending: true, stores: {}, best: null, hidden: 0 };
+    const hide = new Set(it.hide || []);
+    const stores = {}; let hidden = 0;
+    selected.forEach(s => {
+      const all = r.stores[s] || [];
+      const vis = all.filter(d => !hide.has(d.name.toLowerCase()));
+      hidden += all.length - vis.length;
+      if (vis.length) stores[s] = vis;
+    });
+    const priced = Object.values(stores).map(l => l[0]).filter(d => d.unit_price !== null);
+    const best = priced.reduce((m, d) => (!m || d.unit_price < m.unit_price ? d : m), null);
+    return { item: it.q, stores, best, hidden };
+  });
+}
+
+/* ------------------------------------------------------------------- page */
+if (typeof document !== "undefined") {
+  const KEY = "groceryDealFinder";
+  let state = { zip: "", items: [], stores: DEFAULT_STORES.slice(), nearby: [], relay: false, last: null };
+  try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
+  if (!Array.isArray(state.items)) state.items = [];
+  state.items = state.items.map(i => typeof i === "string" ? { q: i, hide: [] } : i).filter(i => i && i.q);
+  if (!Array.isArray(state.stores)) state.stores = DEFAULT_STORES.slice();
+  if (!Array.isArray(state.nearby)) state.nearby = [];
+  let allDeals = null;       // everything read in the latest check (kept in memory only)
+  let sample = null;         // one raw ad entry, for troubleshooting
+  let editing = -1;
+  const expanded = new Set();
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const noUnder = (k, v) => k[0] === "_" ? undefined : v;
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state, noUnder)); }
+    catch (e) { try { localStorage.setItem(KEY, JSON.stringify(Object.assign({}, state, { last: null }), noUnder)); } catch (e2) {} }
+  }
+  const day = d => {
+    if (!d) return "";
+    const t = new Date(d.length <= 10 ? d + "T12:00:00" : d);
+    return isNaN(t) ? "" : t.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+  const say = t => { $("status").textContent = t; };
+  const shownStores = () => [...DEFAULT_STORES, ...state.stores.filter(s => !DEFAULT_STORES.includes(s))];
+  const selectedStores = () => shownStores().filter(s => state.stores.includes(s));
+
+  /* small building blocks */
+  const tag = d => d.unit_price === null
+    ? `<span class="tag none">${esc(d.price_label)}</span>`
+    : `<span class="tag${d.price_label.length > 9 ? " long" : ""}">${esc(d.price_label)}</span>`;
+  const pic = (d, cls) => `<button class="pic ${cls || ""}" ${d.image ? `data-zoom="${esc(d.image)}" data-cap="${esc(d.store + ": " + d.name)}" aria-label="Enlarge picture of ${esc(d.name)}"` : `tabindex="-1" aria-hidden="true"`}>${
+    d.image ? `<img src="${esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</button>`;
+
+  /* ---- list */
+  function drawList() {
+    $("items").innerHTML = state.items.map((it, i) => i === editing
+      ? `<li><input type="text" id="editBox" value="${esc(it.q)}" aria-label="Edit item"></li>`
+      : `<li><button class="name" data-edit="${i}" title="Click to edit">${esc(it.q)}</button><button class="del" data-del="${i}" title="Remove" aria-label="Remove ${esc(it.q)}">&times;</button></li>`).join("");
+    $("empty").hidden = state.items.length > 0;
+    const box = $("editBox");
+    if (box) {
+      box.focus(); box.select();
+      const done = keep => {
+        if (editing < 0) return;
+        const i = editing, v = box.value.trim().slice(0, 80); editing = -1;
+        if (keep && v && v !== state.items[i].q) state.items[i] = { q: v, hide: [] };
+        save(); drawList(); draw();
+      };
+      box.onkeydown = e => { if (e.key === "Enter") done(true); if (e.key === "Escape") done(false); };
+      box.onblur = () => done(true);
+    }
+  }
+  function addItem() {
+    const v = $("newItem").value.trim().slice(0, 80);
+    if (!v) return;
+    if (!state.items.some(i => i.q.toLowerCase() === v.toLowerCase())) state.items.push({ q: v, hide: [] });
+    $("newItem").value = ""; $("newItem").focus(); save(); drawList(); draw();
+  }
+  $("addBtn").onclick = addItem;
+  $("newItem").onkeydown = e => { if (e.key === "Enter") addItem(); };
+  $("items").onclick = e => {
+    const t = e.target.closest("button"); if (!t) return;
+    if (t.dataset.del !== undefined) { state.items.splice(+t.dataset.del, 1); save(); drawList(); draw(); }
+    else if (t.dataset.edit !== undefined) { editing = +t.dataset.edit; drawList(); }
+  };
+
+  /* ---- stores */
+  function drawStores() {
+    const box = (s, on) => `<label><input type="checkbox" data-store="${esc(s)}"${on ? " checked" : ""}> ${esc(s)}</label>`;
+    const shown = shownStores();
+    $("storeBoxes").innerHTML = shown.map(s => box(s, state.stores.includes(s))).join("");
+    const others = state.nearby.filter(s => !shown.includes(s));
+    $("nearbyBoxes").innerHTML = others.map(s => box(s, false)).join("");
+    $("nearbyNote").textContent = others.length
+      ? `${others.length} other store${others.length === 1 ? " has" : "s have"} ads near ${state.zip || "your ZIP"}. Tick any you want compared. Not all of them sell groceries.`
+      : "Stores with ads near your ZIP appear here after you run a check or click the button below.";
+  }
+  function toggleStore(name, on) {
+    state.stores = state.stores.filter(s => s !== name);
+    if (on) state.stores.push(name);
+    save(); drawStores(); draw();
+    if (on && state.last) say(`${name} added. Check again to read its full ad.`);
+  }
+  $("storeBoxes").onchange = $("nearbyBoxes").onchange = e => {
+    if (e.target.dataset.store) toggleStore(e.target.dataset.store, e.target.checked);
+  };
+  function addStore() {
+    const v = storeName($("newStore").value.slice(0, 60));
+    if (!v) return;
+    const known = [...DEFAULT_STORES, ...state.nearby, ...state.stores].find(s => squash(s) === squash(v));
+    $("newStore").value = ""; toggleStore(known || v, true);
+  }
+  $("addStoreBtn").onclick = addStore;
+  $("newStore").onkeydown = e => { if (e.key === "Enter") addStore(); };
+  function readZip() {
+    const z = $("zip").value.trim();
+    if (z !== state.zip) { state.zip = z; state.nearby = []; save(); drawStores(); }
+    return /^\d{5}$/.test(z);
+  }
+  $("zip").onchange = readZip;
+  $("zip").onkeydown = e => { if (e.key === "Enter") $("checkBtn").click(); };
+  $("findBtn").onclick = async () => {
+    if (!readZip()) { $("nearbyNote").textContent = "Enter your 5-digit ZIP code at the top of the page first."; return; }
+    $("findBtn").disabled = true; $("nearbyNote").textContent = "Looking for stores…";
+    const [flyers, err] = await safe(fetchFlyers(state.zip));
+    $("findBtn").disabled = false;
+    if (err || !flyers.length) {
+      drawStores();
+      $("nearbyNote").textContent = "Couldn't load the store list" + (err ? " (" + err.message + ")" : "") +
+        ". Run a check instead: every store advertising your items will then appear here. You can also type a store name.";
+      return;
+    }
+    state.nearby = [...new Set([...state.nearby, ...flyers.map(f => f.store)])].sort((a, b) => a.localeCompare(b));
+    save(); drawStores();
+  };
+  $("relay").onchange = () => { state.relay = useRelay = $("relay").checked; save(); };
+
+  /* ---- check */
+  $("checkBtn").onclick = async () => {
+    if (!readZip()) { say("Enter the 5-digit ZIP code of the stores you shop at."); $("zip").focus(); return; }
+    if (!state.items.length) { say("Add at least one item to your list first."); $("newItem").focus(); return; }
+    if (!selectedStores().length) { say("Tick at least one store."); return; }
+    $("checkBtn").disabled = true; say("Reading this week's ads…");
+    try {
+      const out = await checkPrices(state.zip, state.items.map(i => i.q), selectedStores());
+      allDeals = out.failedCompletely ? null : out.deals; sample = out.sample;
+      state.nearby = [...new Set([...state.nearby, ...out.nearby])].sort((a, b) => a.localeCompare(b));
+      state.last = { when: Date.now(), zip: state.zip, results: out.results, status: out.status,
+                     warnings: out.warnings, failed: out.failedCompletely };
+      save(); drawStores(); draw();
+      say("Checked " + new Date().toLocaleString() + ".");
+    } catch (err) { say("Something went wrong: " + err.message); }
+    $("checkBtn").disabled = false;
+  };
+
+  /* ---- results */
+  function current() { return view(state.last && state.last.results, state.items, selectedStores()); }
+  function planOf(rows) {
+    const plan = {};
+    rows.forEach(r => { if (r.best) (plan[r.best.store] || (plan[r.best.store] = [])).push(r); });
+    return plan;
+  }
+  function draw() {
+    const last = state.last;
+    if (!last) {
+      $("output").innerHTML = `<div class="start"><b>Nothing checked yet.</b><br>Add items to your list, enter your store ZIP code at the top, and click “Check this week's ads”.</div>`;
+      return;
+    }
+    const sel = selectedStores(), rows = current(), plan = planOf(rows);
+    let h = last.warnings.map(w => `<div class="warn noprint">${esc(w)}</div>`).join("");
+    if (!last.failed) sel.forEach(s => { if (!(last.status[s] && last.status[s].items))
+      h += `<div class="warn noprint">No ${esc(s)} deals found near ${esc(last.zip)}. If you just added it, check again; otherwise try the ZIP of the ${esc(s)} you shop at.</div>`; });
+    if (last.failed) { $("output").innerHTML = h; return; }
+
+    const missing = rows.filter(r => !r.pending && !Object.keys(r.stores).length).map(r => r.item);
+    const unpriced = rows.filter(r => !r.pending && Object.keys(r.stores).length && !r.best).map(r => r.item);
+    const pending = rows.filter(r => r.pending).map(r => r.item);
+
+    /* where to buy */
+    h += `<section class="trip"><h2 class="narrow">Where to buy</h2>
+      <p class="soft" style="margin:0">Cheapest advertised price for each item. Ads checked ${esc(new Date(last.when).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }))}.</p>`;
+    sel.filter(s => plan[s]).forEach(s => {
+      h += `<h3 class="narrow">${esc(s)} <span>${plan[s].length} item${plan[s].length > 1 ? "s" : ""}</span></h3>` + plan[s].map(r =>
+        `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}</span></div>${tag(r.best)}</div>`).join("");
+    });
+    if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">No priced deals for your items at the stores you ticked.</p>`;
+    const aside = (title, list, extra) => list.length ? `<p style="margin:14px 0 0"><b>${title}:</b> ${list.map(esc).join(", ")}${extra || ""}</p>` : "";
+    h += aside("On sale, but the ad prints no price", unpriced);
+    h += aside("Not in these stores' ads this week", missing);
+    h += aside("Not checked yet", pending, ". Click “Check this week's ads”.");
+    h += `<div class="row toolbar">
+        <button class="small" data-do="print">Print</button>
+        <button class="small" data-do="copy">Copy as text</button>
+        <button class="small" data-do="csv">Export matches (spreadsheet)</button>
+        ${allDeals ? `<button class="small" data-do="csvall">Export everything the ads returned</button>` : ""}
+      </div></section>`;
+
+    /* one section per list item, offers cheapest first */
+    rows.forEach((r, idx) => {
+      const offers = sel.flatMap(s => r.stores[s] || []).sort(byPrice);
+      if (r.pending || (!offers.length && !r.hidden)) return;
+      const open = expanded.has(r.item), cap = 8;
+      h += `<section class="item noprint"><h3 class="narrow">${esc(r.item)}</h3>`;
+      h += `<p class="sum soft">` + (r.best ? `Cheapest at ${esc(r.best.store)}. ${offers.length} matching deal${offers.length > 1 ? "s" : ""}, lowest price first.`
+          : offers.length ? "On sale, but no price is printed in the ad." : "Every match is hidden.") + `</p>`;
+      h += `<div class="offers">` + (open ? offers : offers.slice(0, cap)).map(d => {
+        const notes = [d.sale_story !== d.price_label ? d.sale_story : "", d.fine].filter(Boolean).join(" | ");
+        return `<div class="offer${d === r.best ? " win" : ""}">${d === r.best ? `<span class="flag">Cheapest</span>` : ""}
+          <div class="store">${esc(d.store)}</div>${pic(d)}
+          <div>${tag(d)}${d.was ? ` <span class="soft was">$${d.was.toFixed(2)}</span>` : ""}</div>
+          <div class="prod">${esc(d.name)}</div>
+          ${notes ? `<div class="soft">${esc(notes)}</div>` : ""}
+          <div class="foot"><span class="soft">${d.valid_to ? "Through " + day(d.valid_to) : ""}</span>
+          <button class="link" data-hide="${idx}" data-name="${esc(d.name)}" title="Not what I want: hide this product for this item">Hide</button></div></div>`;
+      }).join("") + `</div>`;
+      const more = [];
+      if (offers.length > cap) more.push(`<button class="link" data-more="${esc(r.item)}">${open ? "Show fewer" : `Show all ${offers.length}`}</button>`);
+      if (r.hidden) more.push(`${r.hidden} hidden. <button class="link" data-unhide="${idx}">Show again</button>`);
+      if (more.length) h += `<p class="soft" style="margin:10px 0 0">${more.join(" &nbsp; ")}</p>`;
+      h += `</section>`;
+    });
+
+    /* everything the ads returned */
+    h += `<section class="panel noprint"><h2 class="narrow">Everything the ads returned</h2>`;
+    if (allDeals) h += `<p class="soft" style="margin:0 0 10px">All ${allDeals.length} deals read in this check. Use it to see what a store's ad calls a product, then word your list to match.</p>
+      <div class="row"><input type="text" id="browseFilter" placeholder="Filter, e.g. cheese" autocomplete="off" aria-label="Filter deals">
+      <label class="soft"><input type="checkbox" id="browseMine" checked> my stores only</label></div>
+      <div id="browseOut" style="margin-top:10px"></div>`;
+    else h += `<p class="soft" style="margin:0">These are saved results. Check again to browse and export the full ads.</p>`;
+    h += `</section>`;
+
+    h += `<p class="soft noprint">` + sel.map(s => {
+      const st = last.status[s];
+      return `${esc(s)}: ${st && st.items ? st.items + (st.items === 1 ? " deal" : " deals") + (st.valid_to ? ", through " + day(st.valid_to) : "") : "none"}`;
+    }).join(". ") + `.<br>Weekly ads list sale items only, and sizes differ between stores, so check the product named on each deal. Some prices need the store's loyalty card.</p>`;
+    if (sample) h += `<details class="noprint"><summary>Technical details for troubleshooting</summary><pre>${esc(JSON.stringify(sample, null, 1).slice(0, 2500))}</pre></details>`;
+    $("output").innerHTML = h;
+    if (allDeals && $("browseFilter")) { $("browseFilter").oninput = $("browseMine").onchange = drawBrowse; drawBrowse(); }
+  }
+  function browseRows() {
+    const words = tokens($("browseFilter").value), mine = $("browseMine").checked, sel = new Set(selectedStores());
+    return allDeals.filter(d => {
+      if (mine && !sel.has(d.store)) return false;
+      const norm = d._norm || (d._norm = " " + tokens(d._text).join(" ") + " ");
+      return words.every(w => norm.includes(" " + w));
+    }).sort((a, b) => a.store.localeCompare(b.store) || a.name.localeCompare(b.name));
+  }
+  function drawBrowse() {
+    const rows = browseRows(), cap = 60;
+    $("browseOut").innerHTML = `<p class="soft" style="margin:0 0 6px">${rows.length} deal${rows.length === 1 ? "" : "s"}${rows.length > cap ? `, showing the first ${cap}. Filter to narrow, or export to see all.` : ""}</p>` +
+      (rows.length ? `<div class="tablewrap"><table>` + rows.slice(0, cap).map(d =>
+        `<tr><td style="width:1%">${pic(d, "mini")}</td><td class="store">${esc(d.store)}</td><td class="p">${esc(d.price_label)}</td><td>${esc(d.name)}</td></tr>`).join("") + `</table></div>` : "");
+  }
+
+  /* ---- export, copy, print, hide, zoom */
+  function toCsv(rows) {
+    return "﻿" + rows.map(r => r.map(c => {
+      c = String(c ?? ""); if (/^[=+\-@]/.test(c)) c = "'" + c;
+      return /[",\r\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+    }).join(",")).join("\r\n");
+  }
+  function download(name, text) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  const stamp = () => new Date(state.last ? state.last.when : Date.now()).toISOString().slice(0, 10);
+  const cells = d => [d.name, d.price_label, d.unit_price ?? "", d.was ?? "", [d.sale_story, d.fine].filter(Boolean).join(" | "),
+                      d.valid_from.slice(0, 10), d.valid_to.slice(0, 10), d.image || ""];
+  const heads = ["Product in ad", "Advertised price", "Price for one", "Was", "Ad notes", "Valid from", "Valid to", "Picture link"];
+  function exportMatches() {
+    const out = [["List item", "Store", ...heads, "Cheapest"]];
+    const sel = selectedStores();
+    current().forEach(r => {
+      const stores = sel.filter(s => r.stores[s]);
+      if (!stores.length) out.push([r.item, "", r.pending ? "(not checked yet)" : "(not in these stores' ads)"]);
+      stores.forEach(s => r.stores[s].forEach(d => out.push([r.item, s, ...cells(d), d === r.best ? "yes" : ""])));
+    });
+    download(`grocery-matches-${stamp()}.csv`, toCsv(out));
+  }
+  function exportAll() {
+    const sel = new Set(selectedStores());
+    const out = [["Store", ...heads, "One of my stores"]];
+    allDeals.slice().sort((a, b) => a.store.localeCompare(b.store) || a.name.localeCompare(b.name)).forEach(d =>
+      out.push([d.store, ...cells(d), sel.has(d.store) ? "yes" : ""]));
+    download(`grocery-all-ads-${stamp()}.csv`, toCsv(out));
+  }
+  function planText() {
+    const rows = current(), plan = planOf(rows), lines = [];
+    selectedStores().filter(s => plan[s]).forEach(s => {
+      lines.push(s.toUpperCase());
+      plan[s].forEach(r => lines.push(`- ${r.item}: ${r.best.price_label} (${r.best.name})`));
+      lines.push("");
+    });
+    const missing = rows.filter(r => !r.best).map(r => r.item);
+    if (missing.length) lines.push("No advertised price: " + missing.join(", "));
+    return lines.join("\n").trim();
+  }
+  async function copyPlan(btn) {
+    const text = planText();
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {
+      const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t);
+      t.select(); try { document.execCommand("copy"); } catch (e2) {} t.remove();
+    }
+    btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy as text"; }, 1500);
+  }
+  $("output").onclick = e => {
+    const t = e.target.closest("button"); if (!t) return;
+    if (t.dataset.zoom) {
+      $("zoom").querySelector("img").src = t.dataset.zoom; $("zoomCap").textContent = t.dataset.cap || "";
+      if ($("zoom").showModal) $("zoom").showModal(); else window.open(t.dataset.zoom, "_blank", "noopener");
+    }
+    else if (t.dataset.do === "print") window.print();
+    else if (t.dataset.do === "copy") copyPlan(t);
+    else if (t.dataset.do === "csv") exportMatches();
+    else if (t.dataset.do === "csvall") exportAll();
+    else if (t.dataset.more !== undefined) { expanded.has(t.dataset.more) ? expanded.delete(t.dataset.more) : expanded.add(t.dataset.more); draw(); }
+    else if (t.dataset.hide !== undefined) {
+      const it = state.items[+t.dataset.hide]; if (!it) return;
+      (it.hide || (it.hide = [])).push(t.dataset.name.toLowerCase()); save(); draw();
+    } else if (t.dataset.unhide !== undefined) {
+      const it = state.items[+t.dataset.unhide]; if (it) { it.hide = []; save(); draw(); }
+    }
+  };
+  $("zoomClose").onclick = () => $("zoom").close();
+  $("zoom").onclick = e => { if (e.target === $("zoom")) $("zoom").close(); };
+
+  /* ---- start */
+  $("zip").value = state.zip; $("relay").checked = useRelay = !!state.relay;
+  drawList(); drawStores(); draw();
+  if (state.last && !state.last.failed)
+    say("Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
+}
+if (typeof module !== "undefined") module.exports = { checkPrices, view, parseQuery, matches, storeName, makeDeal };
+</script></body></html>
