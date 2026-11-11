@@ -99,6 +99,17 @@
   .item { margin-bottom:30px; }
   .item h3 { margin:0; font-size:1.55rem; line-height:1.1; }
   .item .sum { margin:2px 0 12px; }
+  .narrowit { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 14px; }
+  .narrowit p { margin:0 0 8px; }
+  .kinds { display:flex; flex-wrap:wrap; gap:6px; }
+  .kind { display:inline-flex; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+  .kind button { border:0; border-radius:0; background:none; padding:4px 10px; font-size:.92rem; }
+  .kind button small { color:var(--soft); }
+  .kind button + button { border-left:1px solid var(--line); color:var(--soft); padding:4px 9px; }
+  .kind button:hover { background:var(--paper); }
+  .picks { display:grid; gap:2px; margin-top:8px; max-height:300px; overflow:auto; }
+  .picks label { display:flex; gap:10px; align-items:center; padding:4px 2px; }
+  .picks .nm { flex:1; min-width:0; font-size:.93rem; }
   .offers { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:14px 12px; }
   .offer { position:relative; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px;
            display:flex; flex-direction:column; gap:7px; }
@@ -159,7 +170,7 @@
       <summary>How to be specific</summary>
       <p class="soft" style="margin:8px 0 0">Put an exact phrase in quotes: <b>"large eggs"</b>.<br>
       Leave things out with a minus: <b>eggs -bites -organic</b>.<br>
-      Click an item to edit it. Use Hide on any deal that isn't what you meant.</p>
+      Click an item to edit it. After a check, each item offers words and products to narrow it down, and Hide removes any deal that isn't what you meant.</p>
     </details>
   </div>
 
@@ -395,7 +406,7 @@ function parseQuery(q) {
 }
 function matches(p, deal) {
   if (!p.include.length && !p.phrases.length) return false;
-  const norm = deal._norm || (deal._norm = " " + tokens(deal._text).join(" ") + " ");
+  const norm = deal._norm || (deal._norm = " " + tokens(deal._text || deal.name).join(" ") + " ");
   const has = t => norm.includes(" " + t + " ");
   return p.include.every(has) && p.phrases.every(has) && !p.exclude.some(has);
 }
@@ -510,22 +521,45 @@ async function checkPrices(zip, queries, selected) {
            failedCompletely: !deals.length && failed === attempted };
 }
 
+/* The words that tell matching products apart ("turkey", "mix", "instant"), most common first. */
+const FILLER = new Set(["select", "selected", "varieties", "variety", "assorted", "pack", "size", "family", "each", "per",
+  "pkg", "package", "count", "oz", "lb", "lbs", "ct", "pk", "fl", "gal", "qt", "original", "brand", "fresh", "new", "any"]);
+function kinds(q, offers) {
+  const p = parseQuery(q);
+  const skip = new Set([...p.include, ...p.exclude, ...p.phrases.flatMap(x => x.split(" "))]);
+  offers.forEach(d => tokens(d.store).forEach(w => skip.add(w)));       // a store's own name says nothing about the product
+  const names = [...new Set(offers.map(d => d.name))], count = new Map();
+  names.forEach(n => new Set((n.toLowerCase().match(/[a-z]{3,}/g) || []).filter(w => !FILLER.has(w) && !IGNORED_WORDS.has(w)).map(w => [stem(w), w])
+    .filter(([k]) => !skip.has(k)).map(([k, w]) => k + "|" + w)).forEach(kw => {
+      const [k, w] = kw.split("|"); const e = count.get(k) || { word: w, n: 0 }; e.n++; count.set(k, e);
+    }));
+  return [...count.values()].filter(e => e.n < names.length)
+    .sort((a, b) => b.n - a.n || a.word.localeCompare(b.word)).slice(0, 10);
+}
+
 /* What to show: only the chosen stores, minus products you hid, with the cheapest picked. */
 function view(results, items, selected) {
   return items.map(it => {
     const r = (results || []).find(x => x.item === it.q);
     if (!r) return { item: it.q, pending: true, stores: {}, best: null, hidden: 0 };
     const hide = new Set(it.hide || []);
-    const stores = {}; let hidden = 0;
+    const stores = {}, pool = []; let hidden = 0;
     selected.forEach(s => {
       const all = r.stores[s] || [];
       const vis = all.filter(d => !hide.has(d.name.toLowerCase()));
-      hidden += all.length - vis.length;
+      hidden += all.length - vis.length; pool.push(...vis);
       if (vis.length) stores[s] = vis;
+    });
+    // exact products the shopper ticked; ignored when none of them is in this week's ads
+    const only = new Set(it.only || []);
+    const picked = only.size > 0 && pool.some(d => only.has(d.name.toLowerCase()));
+    if (picked) Object.keys(stores).forEach(s => {
+      stores[s] = stores[s].filter(d => only.has(d.name.toLowerCase()));
+      if (!stores[s].length) delete stores[s];
     });
     const priced = Object.values(stores).map(l => l[0]).filter(d => d.unit_price !== null);
     const best = priced.reduce((m, d) => (!m || d.unit_price < m.unit_price ? d : m), null);
-    return { item: it.q, stores, best, hidden };
+    return { item: it.q, stores, best, hidden, pool, picked, stalePicks: only.size > 0 && !picked };
   });
 }
 
@@ -543,7 +577,7 @@ if (typeof document !== "undefined") {
   let allDeals = null;       // everything read in the latest check (kept in memory only)
   let sample = null;         // one raw ad entry, for troubleshooting
   let editing = -1;
-  const expanded = new Set();
+  const expanded = new Set(), pickOpen = new Set();
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
@@ -775,6 +809,25 @@ if (typeof document !== "undefined") {
       h += `<section class="item noprint"><h3 class="narrow">${esc(r.item)}</h3>`;
       h += `<p class="sum soft">` + (r.best ? `Cheapest at ${esc(r.best.store)}. ${offers.length} matching deal${offers.length > 1 ? "s" : ""}, lowest price first.`
           : offers.length ? "On sale, but no price is printed in the ad." : "Every match is hidden.") + `</p>`;
+      // which one do you mean? distinguishing words first, exact products behind a fold
+      const products = [];
+      r.pool.slice().sort(byPrice).forEach(d => {
+        let e = products.find(x => x.name === d.name);
+        if (!e) products.push(e = { name: d.name, d, stores: new Set() });
+        e.stores.add(d.store);
+      });
+      if (products.length >= 3) {
+        const ks = kinds(r.item, r.pool), it = state.items[idx], only = new Set(it.only || []);
+        h += `<div class="narrowit">`;
+        if (ks.length) h += `<p><b>Which one do you mean?</b> <span class="soft">Pick a word to keep only those, or \u00d7 to leave them out.</span></p>
+          <div class="kinds">` + ks.map(k => `<span class="kind"><button data-kind="${idx}" data-word="${esc(k.word)}">${esc(k.word)} <small>${k.n}</small></button><button data-kind="${idx}" data-word="${esc(k.word)}" data-out="1" title="Leave out ${esc(k.word)}" aria-label="Leave out ${esc(k.word)}">&times;</button></span>`).join("") + `</div>`;
+        h += `<details data-pick="${esc(r.item)}"${pickOpen.has(r.item) ? " open" : ""}${ks.length ? "" : ` style="margin-top:0"`}>
+          <summary>${r.picked ? `Showing only the ${only.size} product${only.size > 1 ? "s" : ""} you ticked` : `Or tick the exact products you'd buy (${products.length} this week)`}</summary>
+          <div class="picks">` + products.map(e => `<label><input type="checkbox" data-only="${idx}" data-name="${esc(e.name)}"${only.has(e.name.toLowerCase()) ? " checked" : ""}>${pic(e.d, "mini")}<span class="nm">${esc(e.name)}</span><span class="soft">${e.d.unit_price !== null ? "from $" + e.d.unit_price.toFixed(2) : ""}${e.stores.size > 1 ? ", " + e.stores.size + " stores" : ""}</span></label>`).join("") + `</div>
+          ${only.size ? `<p class="soft" style="margin:8px 0 0"><button class="link" data-clearonly="${idx}">Clear my ticks</button></p>` : ""}</details>`;
+        if (r.stalePicks) h += `<p class="soft" style="margin:8px 0 0">The products you ticked before aren't in this week's ads, so every match is shown.</p>`;
+        h += `</div>`;
+      }
       h += `<div class="offers">` + (open ? offers : offers.slice(0, cap)).map(d => {
         const notes = [d.sale_story !== d.price_label ? d.sale_story : "", d.fine].filter(Boolean).join(" | ");
         return `<div class="offer${d === r.best ? " win" : ""}">${d === r.best ? `<span class="flag">Cheapest</span>` : ""}
@@ -808,7 +861,29 @@ if (typeof document !== "undefined") {
     if (sample) h += `<details class="noprint"><summary>Technical details for troubleshooting</summary><pre>${esc(JSON.stringify(sample, null, 1).slice(0, 5000))}</pre></details>`;
     $("output").innerHTML = h;
     if (allDeals && $("browseFilter")) { $("browseFilter").oninput = $("browseMine").onchange = drawBrowse; drawBrowse(); }
+    $("output").querySelectorAll("details[data-pick]").forEach(d => { d.ontoggle = () => d.open ? pickOpen.add(d.dataset.pick) : pickOpen.delete(d.dataset.pick); });
   }
+  /* Narrow an item by adding a word to it ("gravy" -> "gravy turkey" or "gravy -dog"), without re-reading the ads. */
+  function refine(idx, word, out) {
+    const it = state.items[idx]; if (!it) return;
+    const oldQ = it.q, newQ = (oldQ + " " + (out ? "-" : "") + word).slice(0, 80);
+    if (state.items.some(i => i.q.toLowerCase() === newQ.toLowerCase())) return;
+    const r = state.last && state.last.results.find(x => x.item === oldQ);
+    if (r) {
+      const p = parseQuery(newQ);
+      Object.keys(r.stores).forEach(s => { r.stores[s] = r.stores[s].filter(d => matches(p, d)); if (!r.stores[s].length) delete r.stores[s]; });
+      r.item = newQ;
+    }
+    if (pickOpen.delete(oldQ)) pickOpen.add(newQ);
+    it.q = newQ; save(); drawList(); draw();
+  }
+  $("output").onchange = e => {
+    const t = e.target; if (t.dataset.only === undefined) return;
+    const it = state.items[+t.dataset.only]; if (!it) return;
+    const n = t.dataset.name.toLowerCase();
+    it.only = (it.only || []).filter(x => x !== n); if (t.checked) it.only.push(n);
+    save(); draw();
+  };
   function browseRows() {
     const words = tokens($("browseFilter").value), mine = $("browseMine").checked, sel = new Set(selectedStores());
     return allDeals.filter(d => {
@@ -888,6 +963,8 @@ if (typeof document !== "undefined") {
     else if (t.dataset.do === "copy") copyPlan(t);
     else if (t.dataset.do === "csv") exportMatches();
     else if (t.dataset.do === "csvall") exportAll();
+    else if (t.dataset.kind !== undefined) refine(+t.dataset.kind, t.dataset.word, !!t.dataset.out);
+    else if (t.dataset.clearonly !== undefined) { const it = state.items[+t.dataset.clearonly]; if (it) { it.only = []; save(); draw(); } }
     else if (t.dataset.more !== undefined) { expanded.has(t.dataset.more) ? expanded.delete(t.dataset.more) : expanded.add(t.dataset.more); draw(); }
     else if (t.dataset.hide !== undefined) {
       const it = state.items[+t.dataset.hide]; if (!it) return;
@@ -906,5 +983,5 @@ if (typeof document !== "undefined") {
   if (state.last && !state.last.failed)
     say("Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
 }
-if (typeof module !== "undefined") module.exports = { findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
+if (typeof module !== "undefined") module.exports = { kinds, findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
 </script></body></html>
