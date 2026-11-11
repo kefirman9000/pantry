@@ -196,6 +196,16 @@
   details.box > summary b { font-size:1.05rem; }
   #help ul { margin:8px 0 12px; padding-left:20px; } #help li { margin-bottom:6px; }
 
+  .checkwrap { margin-top:14px; }
+  .checkwrap button { width:100%; }
+  .choose { background:var(--card); border:2px solid var(--tag); border-radius:10px; padding:18px; margin-bottom:22px; }
+  .choose h2 { font-size:1.6rem; margin:0 0 4px; }
+  .chooseitem { border-top:1px solid var(--line); padding-top:14px; margin-top:14px; }
+  .chooseitem h3 { margin:0; font-size:1.35rem; } .chooseitem h3 .soft { font-stretch:100%; font-weight:400; }
+  .choosebar { margin-top:12px; }
+  .choosebar button { font-size:.98rem; }
+  button.solid:disabled { background:var(--line); border-color:var(--line); color:var(--soft); cursor:default; opacity:1; }
+
   /* header view controls */
   .view { display:flex; gap:6px; margin-top:8px; }
   .view button { background:transparent; color:#fff; border-color:rgba(255,255,255,.45); padding:4px 10px; font-size:.85rem; }
@@ -283,6 +293,10 @@
       <button class="small" id="pasteBtn">Add these items</button>
       <span class="soft" id="pasteNote"></span>
     </details>
+    <div class="checkwrap">
+      <button class="solid big" id="checkBtn2">Check prices</button>
+      <p class="soft" id="checkHint" style="margin:6px 0 0"></p>
+    </div>
     <details>
       <summary>How to be specific</summary>
       <p class="soft" style="margin:8px 0 0">Put an exact phrase in quotes: <b>"large eggs"</b>.<br>
@@ -342,8 +356,8 @@
   <ul>
     <li><b>Where do you shop?</b> Type your ZIP code or town at the top. Nearby stores appear on the left.</li>
     <li><b>What do you need?</b> Add items on the left. Plain words work best, like <i>eggs</i> or <i>chicken breast</i>.</li>
-    <li><b>Check prices.</b> The page reads this week's store ads and shows which store has each item cheapest.</li>
-    <li><b>Not the right product?</b> Tap the item under “Compare stores” and tick the exact one you want. Next week it remembers.</li>
+    <li><b>Prices check by themselves</b> once you have a ZIP code and a list, and again whenever you add something. The big “Check prices” button under your list does it any time.</li>
+    <li><b>Pick which one.</b> If an item could mean different products (like gravy), the page shows every store's options and asks which ones you want before planning. It remembers for next week.</li>
     <li><b>At the store,</b> press “Start shopping” for a big checklist you can tick off.</li>
     <li><b>Double-check a price</b> with the “Check at store” link or by tapping the picture, which is the store's own ad.</li>
   </ul>
@@ -712,7 +726,11 @@ function view(results, items, selected) {
     });
     const priced = Object.values(stores).map(l => l[0]).filter(d => d.unit_price !== null);
     const best = priced.reduce((m, d) => (!m || d.unit_price < m.unit_price ? d : m), null);
-    return { item: it.q, stores, best, hidden, pool, picked, stalePicks: only.size > 0 && !picked };
+    // more than one different product matches: ask which one, unless the shopper already chose
+    const distinct = new Set(pool.map(d => d.name.toLowerCase())).size;
+    const decided = !!it.any || (picked && it.done !== false);
+    return { item: it.q, stores, best, hidden, pool, picked, distinct, needsChoice: distinct >= 2 && !decided,
+             anyOk: !!it.any, stalePicks: only.size > 0 && !picked };
   });
 }
 
@@ -841,7 +859,7 @@ if (typeof document !== "undefined") {
     const have = new Set(state.items.map(i => i.q.toLowerCase()));
     let n = 0;
     list.forEach(v => { if (v && !have.has(v.toLowerCase())) { have.add(v.toLowerCase()); state.items.push({ q: v, hide: [] }); n++; } });
-    if (n) { save(); drawList(); draw(); }
+    if (n) { save(); drawList(); draw(); scheduleAuto(); }
     return n;
   }
   $("pasteBtn").onclick = () => {
@@ -864,7 +882,7 @@ if (typeof document !== "undefined") {
         if (editing < 0) return;
         const i = editing, v = box.value.trim().slice(0, 80); editing = -1;
         if (keep && v && v !== state.items[i].q) state.items[i] = { q: v, hide: [] };
-        save(); drawList(); draw();
+        save(); drawList(); draw(); scheduleAuto();
       };
       box.onkeydown = e => { if (e.key === "Enter") done(true); if (e.key === "Escape") done(false); };
       box.onblur = () => done(true);
@@ -874,13 +892,13 @@ if (typeof document !== "undefined") {
     const v = $("newItem").value.trim().slice(0, 80);
     if (!v) return;
     if (!state.items.some(i => i.q.toLowerCase() === v.toLowerCase())) state.items.push({ q: v, hide: [] });
-    $("newItem").value = ""; $("newItem").focus(); save(); drawList(); draw();
+    $("newItem").value = ""; $("newItem").focus(); save(); drawList(); draw(); scheduleAuto();
   }
   $("addBtn").onclick = addItem;
   $("newItem").onkeydown = e => { if (e.key === "Enter") addItem(); };
   $("items").onclick = e => {
     const t = e.target.closest("button"); if (!t) return;
-    if (t.dataset.del !== undefined) { state.items.splice(+t.dataset.del, 1); save(); drawList(); draw(); }
+    if (t.dataset.del !== undefined) { state.items.splice(+t.dataset.del, 1); save(); drawList(); draw(); drawCheckHint(); }
     else if (t.dataset.edit !== undefined) { editing = +t.dataset.edit; drawList(); }
   };
 
@@ -905,7 +923,8 @@ if (typeof document !== "undefined") {
     state.stores = state.stores.filter(s => s !== name);
     if (on) state.stores.push(name);
     save(); drawStores(); draw();
-    if (on && state.last) say(`${name} added. Check again to read its full ad.`);
+    if (on && state.last) say(`${name} added. Updating prices\u2026`);
+    scheduleAuto(on ? 600 : null);
   }
   $("storeBoxes").onchange = $("nearbyBoxes").onchange = $("otherBoxes").onchange = e => {
     if (e.target.dataset.store) toggleStore(e.target.dataset.store, e.target.checked);
@@ -937,7 +956,7 @@ if (typeof document !== "undefined") {
     state.place = place || "";
     if (changed) { state.zip = zip; state.nearby = []; state.other = []; finding = false; findNote = ""; }
     save(); $("zip").value = state.place || state.zip; hidePlaces();
-    if (changed) { drawStores(); if (zipOk()) autoFind(); if (!state.last) draw(); }
+    if (changed) { drawStores(); if (zipOk()) autoFind(); if (!state.last) draw(); scheduleAuto(400); }
   }
   let choices = [], checkAfterPick = false;
   function hidePlaces() { choices = []; $("places").hidden = true; $("places").innerHTML = ""; }
@@ -989,23 +1008,61 @@ if (typeof document !== "undefined") {
   $("relay").onchange = () => { state.relay = useRelay = $("relay").checked; save(); };
 
   /* ---- check */
-  $("checkBtn").onclick = async () => {
-    if (!(await readZip())) { checkAfterPick = !$("places").hidden; return; }
-    checkAfterPick = false;
+  let running = false, autoTimer = null, autoFailedAt = 0;
+  const ready = () => zipOk() && state.items.length > 0 && selectedStores().length > 0;
+  /* Is anything on screen out of date? (new items, new ZIP, a newly ticked store, last week's ads) */
+  function needsCheck() {
+    const last = state.last;
+    if (!last) return true;
+    if (last.zip !== state.zip || adsAreOld()) return true;
+    if (last.failed) return Date.now() - autoFailedAt > 120000;
+    if (state.items.some(i => !(last.results || []).some(r => r.item === i.q))) return true;
+    return selectedStores().some(st => !(last.status && last.status[st]));
+  }
+  function scheduleAuto(ms) {
+    clearTimeout(autoTimer); drawCheckHint();
+    if (!ready() || !needsCheck()) return;
+    autoTimer = setTimeout(() => {
+      const box = $("zip").value.trim();
+      if (box !== state.zip && box !== state.place) return;      // still typing a place
+      if (ready() && needsCheck()) runCheck(true);
+    }, ms == null ? 1200 : ms);
+  }
+  function drawCheckHint() {
+    const b = $("checkBtn2"), hint = $("checkHint");
+    if (!b) return;
+    b.disabled = running;
+    b.textContent = running ? "Checking prices\u2026" : state.last && !state.last.failed && !needsCheck() ? "Check prices again" : "Check prices";
+    hint.textContent = !zipOk() ? "First, type your ZIP code or town in the box at the top."
+      : !state.items.length ? "Add at least one item above."
+      : !selectedStores().length ? "Tick at least one store below."
+      : "Prices update by themselves when you change your list.";
+  }
+  $("checkBtn2").onclick = () => runCheck(false);
+  $("checkBtn").onclick = () => runCheck(false);
+  async function runCheck(auto) {
+    if (running) return;
+    clearTimeout(autoTimer);
+    if (!auto) {
+      if (!(await readZip())) { checkAfterPick = !$("places").hidden; drawCheckHint(); return; }
+      checkAfterPick = false;
+    }
     if (!state.items.length) { say("Add at least one item to your list first."); $("newItem").focus(); return; }
     if (!selectedStores().length) { say("Tick at least one store."); return; }
-    $("checkBtn").disabled = true; say("Reading this week's ads\u2026 this takes a few seconds.");
+    running = true; $("checkBtn").disabled = true; drawCheckHint();
+    say(auto ? "Updating prices from this week's ads\u2026" : "Reading this week's ads\u2026 this takes a few seconds.");
     try {
       const out = await checkPrices(state.zip, state.items.map(i => i.q), selectedStores());
       const prev = state.last && !state.last.failed && state.last.zip === state.zip ? state.last : null;
       if (out.failedCompletely && prev) {
         // keep the last good results rather than showing nothing
         state.last = Object.assign({}, prev, { fallback: { when: Date.now(), why: out.warnings.join(" ") } });
-        save(); drawStores(); draw();
+        autoFailedAt = Date.now(); save(); drawStores(); draw();
         say("Couldn't reach the store ads just now. Showing your last results. Try again in a few minutes.");
         return;
       }
       allDeals = out.failedCompletely ? null : out.deals; sample = out.sample;
+      selectedStores().forEach(st => { if (!out.status[st]) out.status[st] = { items: 0, valid_to: "" }; });
       state.nearby = [...new Set([...state.nearby, ...out.nearby])].sort((a, b) => a.localeCompare(b));
       // a store whose ad couldn't be read this time keeps its deals from the last check, if they haven't ended
       const filled = [];
@@ -1029,11 +1086,14 @@ if (typeof document !== "undefined") {
       state.last = { when: Date.now(), zip: state.zip, results: out.results, status: out.status,
                      warnings: out.warnings, failed: out.failedCompletely, filled };
       save(); drawStores(); draw();
-      say(out.failedCompletely ? "Couldn't get this week's ads." : "Done. Checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".");
-      if (!out.failedCompletely) $("output").scrollIntoView({ behavior: "smooth", block: "start" });
+      const ask = current().filter(r => r.needsChoice).length;
+      if (out.failedCompletely) autoFailedAt = Date.now();
+      say(out.failedCompletely ? "Couldn't get this week's ads." : ask ? `Done. Now pick which ones you want for ${ask} item${ask > 1 ? "s" : ""}.`
+        : "Prices up to date as of " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".");
+      if (!out.failedCompletely && !auto) $("output").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) { say("Something went wrong: " + err.message); }
-    finally { $("checkBtn").disabled = false; }
-  };
+    finally { running = false; $("checkBtn").disabled = false; drawCheckHint(); }
+  }
 
   /* ---- results */
   function current() { return view(state.last && state.last.results, state.items, selectedStores()); }
@@ -1063,7 +1123,7 @@ if (typeof document !== "undefined") {
   }
   /* Best single store and best pair of stores, against buying each item wherever it is cheapest. */
   function stopsOptions(rows, sel) {
-    const items = rows.filter(r => r.best);
+    const items = rows.filter(r => r.best && !r.needsChoice);
     const used = sel.filter(s => items.some(r => r.best.store === s));
     if (items.length < 2 || used.length < 2) return null;
     const priceAt = (r, s) => { const d = (r.stores[s] || []).find(x => x.unit_price !== null); return d ? d.unit_price : null; };
@@ -1090,7 +1150,7 @@ if (typeof document !== "undefined") {
   function shopData() {
     const rows = current(), plan = planOf(rows), sel = selectedStores();
     const tabs = sel.filter(s => plan[s]).map(s => ({ id: s, label: s, list: plan[s].map(r => ({ key: r.item + "|" + r.best.name, r, d: r.best })) }));
-    const rest = rows.filter(r => !r.pending && !r.best).map(r => ({ key: r.item + "|", r, d: null }));
+    const rest = rows.filter(r => !r.pending && (!r.best || r.needsChoice)).map(r => ({ key: r.item + "|", r, d: null }));
     if (rest.length) tabs.push({ id: "*", label: "No deal this week", list: rest });
     return tabs;
   }
@@ -1105,7 +1165,7 @@ if (typeof document !== "undefined") {
     if (!tab) { $("shopList").innerHTML = `<p>Nothing to shop for yet.</p>`; return; }
     const todo = tab.list.filter(x => !state.got[x.key]), got = tab.list.filter(x => state.got[x.key]);
     const row = x => `<label class="shopitem${state.got[x.key] ? " got" : ""}"><input type="checkbox" data-got="${esc(x.key)}"${state.got[x.key] ? " checked" : ""}>
-      ${x.d ? pic(x.d, "thumb") : ""}<span class="what"><b>${esc(x.r.item)}</b><span class="soft">${x.d ? esc(x.d.name) : "Not on sale at your stores; buy wherever is handy"}</span></span>${x.d ? tag(x.d) : ""}</label>`;
+      ${x.d ? pic(x.d, "thumb") : ""}<span class="what"><b>${esc(x.r.item)}</b><span class="soft">${x.d ? esc(x.d.name) : x.r.needsChoice ? "You haven't picked which one yet" : "Not on sale at your stores; buy wherever is handy"}</span></span>${x.d ? tag(x.d) : ""}</label>`;
     $("shopList").innerHTML = (tab.id === "*" ? "" : `<p class="soft" style="margin:4px 0 6px">Buy these at ${esc(tab.label)}.</p>`)
       + todo.map(row).join("")
       + (got.length ? `<p class="shopdone soft">In the cart</p>` + got.map(row).join("") : "")
@@ -1126,7 +1186,7 @@ if (typeof document !== "undefined") {
   const b64d = str => decodeURIComponent(escape(atob(str.replace(/-/g, "+").replace(/_/g, "/"))));
   $("shareBtn").onclick = async () => {
     if (!state.items.length) { $("shareOut").hidden = false; $("shareOut").value = "Add items to your list first."; return; }
-    const pack = { v: 1, i: state.items.map(i => [i.q, i.only || [], i.hide || []]), z: state.zip, p: state.place, s: state.stores };
+    const pack = { v: 1, i: state.items.map(i => [i.q, i.only || [], i.hide || [], i.any ? 1 : 0]), z: state.zip, p: state.place, s: state.stores };
     const url = location.href.split("#")[0] + "#list=" + b64e(JSON.stringify(pack));
     $("shareOut").hidden = false; $("shareOut").value = url; $("shareOut").select();
     let ok = false;
@@ -1142,7 +1202,7 @@ if (typeof document !== "undefined") {
     history.replaceState(null, "", location.href.split("#")[0]);
     if (!pack || !Array.isArray(pack.i)) { say("That list link is damaged, so it couldn't be opened."); return; }
     const items = pack.i.filter(x => Array.isArray(x) && typeof x[0] === "string" && x[0].trim()).slice(0, 200)
-      .map(x => ({ q: x[0].trim().slice(0, 80), only: (x[1] || []).map(String).slice(0, 50), hide: (x[2] || []).map(String).slice(0, 50) }));
+      .map(x => ({ q: x[0].trim().slice(0, 80), only: (x[1] || []).map(String).slice(0, 50), hide: (x[2] || []).map(String).slice(0, 50), any: x[3] === 1, done: x[3] === 1 || ((x[1] || []).length ? true : undefined) }));
     if (!items.length) return;
     const bar = $("shareBar");
     bar.innerHTML = `<p style="margin:0 0 8px"><b>Someone shared a list with ${items.length} item${items.length > 1 ? "s" : ""}:</b> ${items.slice(0, 6).map(i => esc(i.q)).join(", ")}${items.length > 6 ? "\u2026" : ""}</p>
@@ -1162,6 +1222,7 @@ if (typeof document !== "undefined") {
         }
         save(); $("zip").value = state.place || state.zip; drawList(); drawStores(); draw();
         if (/^\d{5}$/.test(state.zip) && !state.nearby.length) autoFind();
+        scheduleAuto(400);
         say(t.dataset.share === "replace" ? "Shared list opened. Click \u201cCheck prices\u201d." : "Shared items added to your list.");
       }
       bar.hidden = true; bar.innerHTML = "";
@@ -1190,8 +1251,49 @@ if (typeof document !== "undefined") {
 
   function planOf(rows) {
     const plan = {};
-    rows.forEach(r => { if (r.best) (plan[r.best.store] || (plan[r.best.store] = [])).push(r); });
+    rows.forEach(r => { if (r.best && !r.needsChoice) (plan[r.best.store] || (plan[r.best.store] = [])).push(r); });
     return plan;
+  }
+  function productsOf(r) {
+    const products = [];
+    r.pool.slice().sort(byPrice).forEach(d => {
+      let e = products.find(x => x.name === d.name);
+      if (!e) products.push(e = { name: d.name, d, stores: new Set() });
+      e.stores.add(d.store);
+    });
+    return products;
+  }
+  function cardsHtml(idx, list, only, ctx) {
+    return `<div class="pickgrid">` + list.map(e => {
+      const st = [...e.stores];
+      return `<label class="pcard"><input type="checkbox" data-only="${idx}" data-ctx="${ctx}" data-name="${esc(e.name)}"${only.has(e.name.toLowerCase()) ? " checked" : ""} aria-label="${esc(e.name)}">
+        ${pic(e.d)}<span class="nm">${esc(e.name)}</span>
+        <span class="where">${e.d.unit_price !== null ? `<b>${esc(e.d.price_label)}</b> at ${esc(e.d.store)}` : `At ${esc(e.d.store)}, no price printed`}${st.length > 1 ? `<br>Also at ${esc(st.filter(x => x !== e.d.store).join(", "))}` : ""}</span></label>`;
+    }).join("") + `</div>`;
+  }
+  function typesHtml(r, idx) {
+    const ks = kinds(r.item, r.pool);
+    return ks.length ? `<p style="margin:14px 0 0"><b>Or pick by type</b> <span class="soft">This also updates your list, so it applies next week too.</span></p><div class="types">` +
+      ks.map(k => `<div class="type"><span class="kind"><button data-kind="${idx}" data-word="${esc(k.word)}" title="Keep only products with \u201c${esc(k.word)}\u201d">Only ${esc(k.word)}</button><button data-kind="${idx}" data-word="${esc(k.word)}" data-out="1" title="Leave out products with \u201c${esc(k.word)}\u201d">Not ${esc(k.word)}</button></span>
+        <span class="ex"><b>${k.n} product${k.n > 1 ? "s" : ""}:</b> ${k.names.slice(0, 3).map(esc).join("; ")}${k.n > 3 ? `; and ${k.n - 3} more` : ""}</span></div>`).join("") + `</div>` : "";
+  }
+  /* Step after the check: ask which product the shopper means, with every store's price shown */
+  function chooseHtml(list) {
+    let h = `<section class="choose"><h2 class="narrow">First, which ones do you want?</h2>
+      <p class="soft" style="margin:0 0 6px">${list.length === 1 ? "One item" : list.length + " items"} on your list could mean different products. Here is what each store has on sale.
+      Tick the ones you'd buy, then press <b>Compare</b>. Your choice is remembered for next week.</p>`;
+    list.forEach(({ r, idx }) => {
+      const it = state.items[idx], only = new Set(it.only || []), products = productsOf(r);
+      const showAll = pickOpen.has(r.item), cap = 12, ticked = products.filter(e => only.has(e.name.toLowerCase())).length;
+      h += `<div class="chooseitem"><h3 class="narrow">${esc(r.item)} <span class="soft">${products.length} choices, cheapest first</span></h3>`;
+      if (r.stalePicks) h += `<p class="soft" style="margin:0 0 6px">What you picked last time isn't on sale this week. Pick again, or choose \u201cAny is fine\u201d.</p>`;
+      h += cardsHtml(idx, showAll ? products : products.slice(0, cap), only, "choose");
+      if (products.length > cap) h += `<p style="margin:8px 0 0"><button class="link" data-allpicks="${esc(r.item)}">${showAll ? "Show fewer" : `Show all ${products.length}`}</button></p>`;
+      h += typesHtml(r, idx);
+      h += `<div class="row choosebar"><button class="solid" data-confirm="${idx}"${ticked ? "" : " disabled"}>${ticked ? `Compare ${ticked === 1 ? "this one" : "these " + ticked}` : "Tick one or more above"}</button>
+        <button data-any="${idx}">Any is fine, just find the cheapest</button></div></div>`;
+    });
+    return h + `</section>`;
   }
   const longDate = t => new Date(t).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
   const warnBox = html => `<div class="warn noprint">${html}</div>`;
@@ -1203,7 +1305,7 @@ if (typeof document !== "undefined") {
       <ol class="steps">
         ${step(s1, s1 ? `Shopping near ${esc(here())}` : "Tell us where you shop", s1 ? "Change it in the box at the top any time." : "Type your ZIP code or town in the box at the top.")}
         ${step(s2, s2 ? `${state.items.length} item${state.items.length > 1 ? "s" : ""} on your list` : "Add what you need", s2 ? "Add more on the left, or tap a regular." : "Type items on the left, or tap a regular like milk or eggs.")}
-        ${step(false, "Check prices", "This reads this week's store ads and shows where each item is cheapest.")}
+        ${step(false, "See the prices", s1 && s2 ? "Checking by itself in a moment, or press the button." : "Happens by itself once the first two steps are done.")}
       </ol>
       <button class="solid big" data-do="check"${s1 && s2 ? "" : " disabled"}>Check prices</button>
       ${s1 && s2 ? "" : `<p class="soft" style="margin:8px 0 0">Finish the steps above first.</p>`}</section>`;
@@ -1227,9 +1329,11 @@ if (typeof document !== "undefined") {
       h += warnBox(`No ${esc(st)} deals found near ${esc(last.zip)}. If you just added this store, press \u201cCheck prices\u201d again. Otherwise it may not advertise near this ZIP code.`); });
 
     const missing = rows.filter(r => !r.pending && !Object.keys(r.stores).length).map(r => r.item);
-    const unpriced = rows.filter(r => !r.pending && Object.keys(r.stores).length && !r.best).map(r => r.item);
+    const unpriced = rows.filter(r => !r.pending && !r.needsChoice && Object.keys(r.stores).length && !r.best).map(r => r.item);
     const pending = rows.filter(r => r.pending).map(r => r.item);
-    const stale = rows.filter(r => r.stalePicks).map(r => r.item);
+    const stale = rows.filter(r => r.stalePicks && !r.needsChoice).map(r => r.item);
+    const choose = rows.map((r, idx) => ({ r, idx })).filter(x => !x.r.pending && x.r.needsChoice);
+    if (choose.length) h += chooseHtml(choose);
 
     /* 1. the answer: where to buy each item */
     h += `<section class="trip"><div class="triphead"><div><h2 class="narrow">Where to buy each item</h2>
@@ -1244,12 +1348,13 @@ if (typeof document !== "undefined") {
           <span class="vs">${vs} &middot; ${verify(r.best)}</span>${flagHtml(flagsOf(r.best, r))}</div>${tag(r.best)}</div>`;
       }).join("");
     });
-    if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">None of your items has a sale price at the stores you ticked this week.</p>`;
+    if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">${choose.length ? "Pick which ones you want above, and the plan appears here." : "None of your items has a sale price at the stores you ticked this week."}</p>`;
     else {
-      const total = rows.filter(r => r.best).map(r => compareOf(r, sel)).reduce((a, c) => a + (c.save || 0), 0);
+      const total = rows.filter(r => r.best && !r.needsChoice).map(r => compareOf(r, sel)).reduce((a, c) => a + (c.save || 0), 0);
       if (total > 0.004) h += `<p style="margin:14px 0 0"><b>About ${money(total)} saved</b> <span class="soft">compared with buying each item at the next-cheapest store.</span></p>`;
     }
     const note = (title, list, extra) => list.length ? `<p style="margin:12px 0 0"><b>${title}:</b> ${list.map(esc).join(", ")}${extra || ""}</p>` : "";
+    h += note("Waiting for you to pick which one (see above)", choose.map(x => x.r.item));
     h += note("Your usual pick isn't on sale this week, so other matches are shown", stale);
     h += note("On sale, but the ad doesn't print a price (tap the item below to see it)", unpriced);
     h += note("Not on sale at your stores this week", missing, ". Buy these wherever is handy.");
@@ -1273,23 +1378,17 @@ if (typeof document !== "undefined") {
     }
 
     /* 3. item by item, folded until tapped */
-    const shown = rows.filter(r => !r.pending && (sel.some(st => r.stores[st]) || r.hidden));
+    const shown = rows.filter(r => !r.pending && !r.needsChoice && (sel.some(st => r.stores[st]) || r.hidden));
     if (shown.length) h += `<h2 class="narrow sect noprint">Compare stores, item by item</h2>
       <p class="soft noprint" style="margin:0 0 6px">Tap an item to see every store's price, check the product, or pick the exact one you want.</p>`;
     rows.forEach((r, idx) => {
       const offers = sel.flatMap(st => r.stores[st] || []).sort(byPrice);
-      if (r.pending || (!offers.length && !r.hidden)) return;
+      if (r.pending || r.needsChoice || (!offers.length && !r.hidden)) return;
       const open = expanded.has(r.item), cap = 8;
-      const products = [];
-      r.pool.slice().sort(byPrice).forEach(d => {
-        let e = products.find(x => x.name === d.name);
-        if (!e) products.push(e = { name: d.name, d, stores: new Set() });
-        e.stores.add(d.store);
-      });
-      const needsPick = products.length >= 3 && !r.picked;
+      const products = productsOf(r);
       h += `<details class="item noprint" data-item="${esc(r.item)}"${itemOpen.has(r.item) ? " open" : ""}><summary>
         <span class="iname">${esc(r.item)}</span>
-        <span class="isum">${r.best ? `Cheapest at <b>${esc(r.best.store)}</b>, ${esc(r.best.price_label)}` : offers.length ? "On sale, price not printed" : "Every match is hidden"}${needsPick ? `<span class="badge">${products.length} kinds: pick yours</span>` : ""}</span>
+        <span class="isum">${r.best ? `Cheapest at <b>${esc(r.best.store)}</b>, ${esc(r.best.price_label)}` : offers.length ? "On sale, price not printed" : "Every match is hidden"}${r.picked ? `<span class="badge">your pick</span>` : ""}</span>
         <span class="open">See details</span></summary><div class="ibody">`;
       // price by store: proof that the pick really is the lowest
       const c = compareOf(r, sel);
@@ -1302,32 +1401,16 @@ if (typeof document !== "undefined") {
           c.rest.map(x => `<tr><td class="store">${esc(x.store)}</td><td class="soft" colspan="4">${x.has ? "On sale, but the ad doesn't print a price" : "Not on sale this week"}</td></tr>`).join("") +
           `</table></div>` + (r.picked ? "" : `<p class="soft" style="margin:6px 0 0">Stores may be selling different brands or sizes. To compare the same product, tick it below.</p>`) + `</div>`;
       }
-      // which one do you mean?
-      if (products.length >= 3) {
-        const ks = kinds(r.item, r.pool), it = state.items[idx], only = new Set(it.only || []);
-        const what = parseQuery(r.item).search || r.item;
-        const cardsOf = list => `<div class="pickgrid">` + list.map(e => {
-          const st = [...e.stores];
-          return `<label class="pcard"><input type="checkbox" data-only="${idx}" data-name="${esc(e.name)}"${only.has(e.name.toLowerCase()) ? " checked" : ""} aria-label="${esc(e.name)}">
-            ${pic(e.d)}<span class="nm">${esc(e.name)}</span>
-            <span class="where">${e.d.unit_price !== null ? `<b>${esc(money(e.d.unit_price))}</b> at ${esc(e.d.store)}` : `At ${esc(e.d.store)}, no price printed`}${st.length > 1 ? `<br>Also at ${esc(st.filter(x => x !== e.d.store).join(", "))}` : ""}</span></label>`;
-        }).join("") + `</div>`;
+      // what was chosen, and a way to change it
+      if (products.length >= 2) {
+        const it = state.items[idx], only = new Set(it.only || []);
         h += `<div class="narrowit">`;
         if (r.picked) {
           const mine = products.filter(e => only.has(e.name.toLowerCase()));
-          h += `<details data-pick="${esc(r.item)}"${pickOpen.has(r.item) ? " open" : ""} style="margin:0"><summary><b style="color:var(--ink)">Comparing only:</b> ${mine.map(e => esc(e.name)).join(", ")}. Change</summary>`
-            + cardsOf(products) + `<p class="soft" style="margin:8px 0 0"><button class="link" data-clearonly="${idx}">Compare every ${esc(what)} again</button></p></details>`;
-        } else {
-          const showAll = pickOpen.has(r.item), cap2 = 8;
-          h += `<h4>Which ${esc(what)} do you want?</h4>
-            <p class="soft">There are ${products.length} different ones on sale. Tick the ones you'd buy and only those are compared. Tick nothing to compare them all.</p>`
-            + cardsOf(showAll ? products : products.slice(0, cap2));
-          if (products.length > cap2) h += `<p style="margin:8px 0 0"><button class="link" data-allpicks="${esc(r.item)}">${showAll ? "Show fewer" : `Show all ${products.length}`}</button></p>`;
-          if (ks.length) h += `<p style="margin:14px 0 0"><b>Or narrow by type</b> <span class="soft">This also updates your list, so it applies next week too.</span></p><div class="types">` +
-            ks.map(k => `<div class="type"><span class="kind"><button data-kind="${idx}" data-word="${esc(k.word)}" title="Keep only products with \u201c${esc(k.word)}\u201d">Only ${esc(k.word)}</button><button data-kind="${idx}" data-word="${esc(k.word)}" data-out="1" title="Leave out products with \u201c${esc(k.word)}\u201d">Not ${esc(k.word)}</button></span>
-              <span class="ex"><b>${k.n} product${k.n > 1 ? "s" : ""}:</b> ${k.names.slice(0, 3).map(esc).join("; ")}${k.n > 3 ? `; and ${k.n - 3} more` : ""}</span></div>`).join("") + `</div>`;
+          h += `<p style="margin:0"><b>You picked:</b> ${mine.map(e => esc(e.name)).join(", ")}. <button class="link" data-askagain="${idx}">Pick again</button></p>`;
+        } else if (r.anyOk) {
+          h += `<p style="margin:0">You said any ${esc(parseQuery(r.item).search || r.item)} is fine, so this shows the cheapest of ${products.length} kinds. <button class="link" data-askagain="${idx}">Let me pick which one</button></p>`;
         }
-        if (r.stalePicks) h += `<p class="soft" style="margin:8px 0 0">The products you ticked before aren't on sale this week, so all matches are shown.</p>`;
         h += `</div>`;
       }
       h += `<p style="margin:4px 0 8px"><b>Every deal, cheapest first</b></p><div class="offers">` + (open ? offers : offers.slice(0, cap)).map(d => {
@@ -1387,6 +1470,8 @@ if (typeof document !== "undefined") {
     const it = state.items[+t.dataset.only]; if (!it) return;
     const n = t.dataset.name.toLowerCase();
     it.only = (it.only || []).filter(x => x !== n); if (t.checked) it.only.push(n);
+    if (t.dataset.ctx === "choose") { it.done = false; it.any = false; }
+    else if (!it.only.length) { it.done = undefined; }
     save(); draw();
   };
   function browseRows() {
@@ -1449,7 +1534,9 @@ if (typeof document !== "undefined") {
       });
       lines.push("");
     });
-    const missing = rows.filter(r => !r.best).map(r => r.item);
+    const undecided = rows.filter(r => r.needsChoice).map(r => r.item);
+    const missing = rows.filter(r => !r.best && !r.needsChoice).map(r => r.item);
+    if (undecided.length) lines.push("Still to choose: " + undecided.join(", "));
     if (missing.length) lines.push("No advertised price: " + missing.join(", "));
     return lines.join("\n").trim();
   }
@@ -1465,7 +1552,11 @@ if (typeof document !== "undefined") {
   $("output").onclick = e => {
     const t = e.target.closest("button"); if (!t) return;
     if (t.dataset.do === "shop") { openShop(); return; }
-    if (t.dataset.do === "check") { $("checkBtn").click(); return; }
+    if (t.dataset.do === "check") { runCheck(false); return; }
+    if (t.dataset.confirm !== undefined) { const it = state.items[+t.dataset.confirm]; if (it) { it.done = true; it.any = false; save(); draw(); } return; }
+    if (t.dataset.any !== undefined) { const it = state.items[+t.dataset.any]; if (it) { it.any = true; it.only = []; it.done = true; save(); draw(); } return; }
+    if (t.dataset.askagain !== undefined) { const it = state.items[+t.dataset.askagain]; if (it) { it.any = false; it.only = []; it.done = undefined; itemOpen.delete(it.q); save(); draw();
+      $("output").scrollIntoView({ behavior: "smooth", block: "start" }); } return; }
     if (t.dataset.zoom) {
       $("zoom").querySelector("img").src = t.dataset.zoom; $("zoomCap").textContent = t.dataset.cap || "";
       if ($("zoom").showModal) $("zoom").showModal(); else window.open(t.dataset.zoom, "_blank", "noopener");
@@ -1497,10 +1588,11 @@ if (typeof document !== "undefined") {
   EXAMPLE.town = pickEx[0];
   $("zip").placeholder = `${pickEx[1]} or ${pickEx[0]}`;
   $("zip").value = state.place || state.zip; $("relay").checked = useRelay = !!state.relay;
-  applyView(); drawList(); drawStores(); draw(); readShared();
+  applyView(); drawList(); drawStores(); draw(); readShared(); drawCheckHint();
   if (/^\d{5}$/.test(state.zip) && !state.nearby.length && !state.other.length) autoFind();
-  if (state.last && !state.last.failed && !$("status").textContent)
-    say(adsAreOld() ? "New ads are out since your last check. Press \u201cCheck prices\u201d." : "Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
+  if (ready() && needsCheck()) scheduleAuto(300);
+  else if (state.last && !state.last.failed && !$("status").textContent)
+    say(adsAreOld() ? "New ads are out since your last check. Press \u201cCheck prices\u201d." : "Prices are from this week's ads, checked " + new Date(state.last.when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) + ".");
 }
 if (typeof module !== "undefined") module.exports = { kinds, findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
 </script></body></html>
