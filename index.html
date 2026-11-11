@@ -160,16 +160,16 @@
   <div class="panel">
     <h2 class="narrow">Stores</h2>
     <div class="checks" id="storeBoxes"></div>
+    <p class="soft" id="nearbyNote" style="margin:12px 0 6px"></p>
+    <div class="checks" id="nearbyBoxes"></div>
     <details id="moreStores">
-      <summary>Add other stores near you</summary>
-      <p class="soft" id="nearbyNote" style="margin:10px 0 8px"></p>
-      <div class="checks" id="nearbyBoxes"></div>
-      <div class="row" style="margin-top:12px">
-        <input type="text" id="newStore" placeholder="Store name, e.g. Aldi" autocomplete="off" aria-label="Store name">
-        <button class="small" id="addStoreBtn">Add store</button>
-      </div>
-      <button class="small" id="findBtn" style="margin-top:8px">Find stores near my ZIP</button>
+      <summary id="otherSum">Other stores with ads</summary>
+      <div class="checks" id="otherBoxes" style="margin-top:8px"></div>
     </details>
+    <div class="row" style="margin-top:12px">
+      <input type="text" id="newStore" placeholder="Add a store by name" autocomplete="off" aria-label="Store name">
+      <button class="small" id="addStoreBtn">Add store</button>
+    </div>
   </div>
 
   <div class="panel">
@@ -240,6 +240,19 @@ async function fetchSearch(zip, q) {
   return ((data && data.items) || []).filter(i => i && typeof i === "object");
 }
 const safe = p => p.then(v => [v, null], e => [[], e]);
+/* Stores near a ZIP: everyone with an ad there, plus a few everyday searches to tell which ones sell groceries. */
+const PROBES = ["milk", "bread", "chicken", "cereal"];
+async function findStores(zip) {
+  const res = await Promise.all([safe(fetchFlyers(zip)), ...PROBES.map(q => safe(fetchSearch(zip, q)))]);
+  const [flyers, listErr] = res[0], probes = res.slice(1);
+  const grocery = new Set(), other = new Set();
+  probes.forEach(([rows]) => rows.forEach(r => { const s = storeName(r.merchant_name || r.merchant); if (s) grocery.add(s); }));
+  flyers.forEach(f => { if (!grocery.has(f.store)) other.add(f.store); });
+  const abc = set => [...set].sort((a, b) => a.localeCompare(b));
+  const firstErr = listErr || (probes.find(([, e]) => e) || [])[1];
+  return { grocery: abc(grocery), other: abc(other), ok: grocery.size + other.size > 0,
+           error: firstErr ? firstErr.message : "no stores found for this ZIP" };
+}
 
 /* --------------------------------------------------- understanding a deal */
 function toFloat(v) {
@@ -352,7 +365,6 @@ async function checkPrices(zip, queries, selected) {
   const [flyers, err] = await safe(fetchFlyers(zip));
   let fullAdsFailed = !!err;
   if (err) note("list of ads", err);
-  flyers.forEach(f => nearby.add(f.store));
   const perStore = {}, jobs = [];
   let sample = null;
   flyers.forEach(f => {
@@ -440,12 +452,14 @@ function view(results, items, selected) {
 /* ------------------------------------------------------------------- page */
 if (typeof document !== "undefined") {
   const KEY = "groceryDealFinder";
-  let state = { zip: "", items: [], stores: DEFAULT_STORES.slice(), nearby: [], relay: false, last: null };
+  let state = { zip: "", items: [], stores: DEFAULT_STORES.slice(), nearby: [], other: [], relay: false, last: null };
   try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
   if (!Array.isArray(state.items)) state.items = [];
   state.items = state.items.map(i => typeof i === "string" ? { q: i, hide: [] } : i).filter(i => i && i.q);
   if (!Array.isArray(state.stores)) state.stores = DEFAULT_STORES.slice();
   if (!Array.isArray(state.nearby)) state.nearby = [];
+  if (!Array.isArray(state.other)) state.other = [];
+  let finding = false, findNote = "";
   let allDeals = null;       // everything read in the latest check (kept in memory only)
   let sample = null;         // one raw ad entry, for troubleshooting
   let editing = -1;
@@ -513,11 +527,18 @@ if (typeof document !== "undefined") {
     const box = (s, on) => `<label><input type="checkbox" data-store="${esc(s)}"${on ? " checked" : ""}> ${esc(s)}</label>`;
     const shown = shownStores();
     $("storeBoxes").innerHTML = shown.map(s => box(s, state.stores.includes(s))).join("");
-    const others = state.nearby.filter(s => !shown.includes(s));
-    $("nearbyBoxes").innerHTML = others.map(s => box(s, false)).join("");
-    $("nearbyNote").textContent = others.length
-      ? `${others.length} other store${others.length === 1 ? " has" : "s have"} ads near ${state.zip || "your ZIP"}. Tick any you want compared. Not all of them sell groceries.`
-      : "Stores with ads near your ZIP appear here after you run a check or click the button below.";
+    const near = state.nearby.filter(s => !shown.includes(s));
+    const other = state.other.filter(s => !shown.includes(s) && !state.nearby.includes(s));
+    $("nearbyBoxes").innerHTML = near.map(s => box(s, false)).join("");
+    $("otherBoxes").innerHTML = other.map(s => box(s, false)).join("");
+    $("moreStores").hidden = !other.length;
+    $("otherSum").textContent = `${other.length} other store${other.length === 1 ? "" : "s"} with ads (not all sell groceries)`;
+    const zipOk = /^\d{5}$/.test(state.zip);
+    $("nearbyNote").textContent = finding ? `Looking for stores near ${state.zip}\u2026`
+      : findNote ? findNote
+      : near.length ? `Also advertising groceries near ${state.zip}:`
+      : zipOk ? "" : "Enter your ZIP code at the top and the stores near you appear here.";
+    $("nearbyNote").hidden = !$("nearbyNote").textContent;
   }
   function toggleStore(name, on) {
     state.stores = state.stores.filter(s => s !== name);
@@ -525,38 +546,40 @@ if (typeof document !== "undefined") {
     save(); drawStores(); draw();
     if (on && state.last) say(`${name} added. Check again to read its full ad.`);
   }
-  $("storeBoxes").onchange = $("nearbyBoxes").onchange = e => {
+  $("storeBoxes").onchange = $("nearbyBoxes").onchange = $("otherBoxes").onchange = e => {
     if (e.target.dataset.store) toggleStore(e.target.dataset.store, e.target.checked);
   };
   function addStore() {
     const v = storeName($("newStore").value.slice(0, 60));
     if (!v) return;
-    const known = [...DEFAULT_STORES, ...state.nearby, ...state.stores].find(s => squash(s) === squash(v));
+    const known = [...DEFAULT_STORES, ...state.nearby, ...state.other, ...state.stores].find(s => squash(s) === squash(v));
     $("newStore").value = ""; toggleStore(known || v, true);
   }
   $("addStoreBtn").onclick = addStore;
   $("newStore").onkeydown = e => { if (e.key === "Enter") addStore(); };
+  async function autoFind() {
+    const zip = state.zip;
+    finding = true; findNote = ""; drawStores();
+    const found = await findStores(zip);
+    if (zip !== state.zip) return;             // the ZIP changed while we were looking
+    finding = false;
+    if (found.ok) {
+      state.nearby = [...new Set([...state.nearby, ...found.grocery])].sort((a, b) => a.localeCompare(b));
+      state.other = found.other; save();
+    } else findNote = `Couldn't load the stores near ${zip} (${found.error}). Run a check and the stores advertising your items appear here, or add one by name.`;
+    drawStores();
+  }
   function readZip() {
-    const z = $("zip").value.trim();
-    if (z !== state.zip) { state.zip = z; state.nearby = []; save(); drawStores(); }
-    return /^\d{5}$/.test(z);
+    const z = $("zip").value.trim(), ok = /^\d{5}$/.test(z);
+    if (z !== state.zip) {
+      state.zip = z; state.nearby = []; state.other = []; finding = false; findNote = "";
+      save(); drawStores(); if (ok) autoFind();
+    }
+    return ok;
   }
   $("zip").onchange = readZip;
+  $("zip").oninput = () => { if (/^\d{5}$/.test($("zip").value.trim())) readZip(); };
   $("zip").onkeydown = e => { if (e.key === "Enter") $("checkBtn").click(); };
-  $("findBtn").onclick = async () => {
-    if (!readZip()) { $("nearbyNote").textContent = "Enter your 5-digit ZIP code at the top of the page first."; return; }
-    $("findBtn").disabled = true; $("nearbyNote").textContent = "Looking for stores…";
-    const [flyers, err] = await safe(fetchFlyers(state.zip));
-    $("findBtn").disabled = false;
-    if (err || !flyers.length) {
-      drawStores();
-      $("nearbyNote").textContent = "Couldn't load the store list" + (err ? " (" + err.message + ")" : "") +
-        ". Run a check instead: every store advertising your items will then appear here. You can also type a store name.";
-      return;
-    }
-    state.nearby = [...new Set([...state.nearby, ...flyers.map(f => f.store)])].sort((a, b) => a.localeCompare(b));
-    save(); drawStores();
-  };
   $("relay").onchange = () => { state.relay = useRelay = $("relay").checked; save(); };
 
   /* ---- check */
@@ -754,8 +777,9 @@ if (typeof document !== "undefined") {
   /* ---- start */
   $("zip").value = state.zip; $("relay").checked = useRelay = !!state.relay;
   drawList(); drawStores(); draw();
+  if (/^\d{5}$/.test(state.zip) && !state.nearby.length && !state.other.length) autoFind();
   if (state.last && !state.last.failed)
     say("Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
 }
-if (typeof module !== "undefined") module.exports = { checkPrices, view, parseQuery, matches, storeName, makeDeal };
+if (typeof module !== "undefined") module.exports = { findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
 </script></body></html>
