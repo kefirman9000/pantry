@@ -1466,7 +1466,7 @@ if (typeof document !== "undefined") {
         const c = compareOf(r, sel);
         const vs = !c.next ? "Only store with this on sale" : c.mixed ? `Priced differently at ${esc(c.next.store)} (per pound vs each), so compare in the details`
           : c.save ? `<b>Saves ${money(c.save)}</b> vs ${esc(c.next.store)}` : `Same price at ${esc(c.next.store)}`;
-        return `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}${r.picked ? " (your pick)" : ""}</span>
+        return `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}${r.picked ? " (your pick)" : r.anyOk ? " (any kind)" : ""}${r.picked || (r.anyOk && r.distinct >= 2) ? ` <button class="link noprint" data-askagain="${state.items.findIndex(i => i.q === r.item)}">Change</button>` : ""}</span>
           <span class="vs">${vs} &middot; ${verify(r.best)}</span>${flagHtml(flagsOf(r.best, r))}</div>${tag(r.best)}</div>`;
       }).join("");
     });
