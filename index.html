@@ -13,8 +13,11 @@
     :root { --paper:#111813; --card:#1A241D; --ink:#E8EFE9; --soft:#9DB0A3; --line:#2C3A30;
             --leaf:#58C48A; --leaf-ink:#0D1A12; --band:#0E2A1B; --hot:#FF6B5E; --warn-bg:#3A3016; --warn:#F2CF7A; } }
   * { box-sizing:border-box; }
+  html { font-size:100%; } html[data-size="1"] { font-size:112.5%; } html[data-size="2"] { font-size:128%; }
+  :root[data-contrast="1"] { --paper:#FFFFFF; --card:#FFFFFF; --ink:#000000; --soft:#1F1F1F; --line:#000000;
+          --leaf:#004D26; --leaf-ink:#FFFFFF; --band:#000000; --tag:#FFE14D; --tag-ink:#000000; --hot:#B00000; --warn-bg:#FFE9A8; --warn:#000000; }
   body { margin:0; background:var(--paper); color:var(--ink);
-         font:16px/1.45 Archivo,system-ui,-apple-system,"Segoe UI",sans-serif; }
+         font:1rem/1.45 Archivo,system-ui,-apple-system,"Segoe UI",sans-serif; }
   .narrow { font-stretch:68%; font-weight:800; letter-spacing:.005em; }
   .soft { color:var(--soft); font-size:.9rem; }
 
@@ -94,7 +97,7 @@
   .line .what b { display:block; }
   .line .tag.long { max-width:44%; text-align:right; }
   .vs { display:block; font-size:.85rem; color:var(--soft); margin-top:2px; }
-  .vs b { display:inline; color:var(--leaf); font-weight:700; }
+  .line .what .vs b { display:inline; color:var(--leaf); font-weight:700; }
   .cmp { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 14px; }
   .cmp p { margin:0 0 6px; }
   .cmp table { font-size:.92rem; }
@@ -158,7 +161,48 @@
   dialog img { max-width:100%; max-height:70vh; display:block; margin:0 auto 10px; }
   dialog button { background:#fff; color:#17261C; border-color:#cfd8cd; }
 
+  /* header view controls */
+  .view { display:flex; gap:6px; margin-top:8px; }
+  .view button { background:transparent; color:#fff; border-color:rgba(255,255,255,.45); padding:4px 10px; font-size:.85rem; }
+  .view button[aria-pressed="true"] { background:#fff; color:#17261C; }
+  #shareBar { max-width:1200px; margin:0 auto; padding:0 16px 12px; color:#fff; }
+  #shareBar .row button { background:#fff; color:#17261C; border-color:#fff; }
+
+  /* quick add + paste */
+  .staples { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; align-items:center; }
+  .staples button { padding:3px 10px; font-size:.86rem; border-radius:999px; }
+  textarea { font:inherit; color:inherit; background:var(--paper); border:1px solid var(--line); border-radius:7px;
+             padding:8px 10px; width:100%; resize:vertical; margin:8px 0; }
+  .tools button { width:100%; text-align:left; margin-top:8px; }
+  #shareOut { width:100%; margin-top:8px; font-size:.85rem; }
+
+  /* fewer stops */
+  .stops .opt { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 14px; padding:10px 0; border-top:1px solid var(--line); }
+  .stops .opt .cost { text-align:right; font-weight:700; white-space:nowrap; }
+  .stops .opt .soft { grid-column:1 / -1; }
+  .stops .opt.now b { color:var(--leaf); }
+
+  /* shopping mode */
+  #shop { position:fixed; inset:0; z-index:40; background:var(--paper); overflow:auto; font-size:1.12rem; }
+  #shop[hidden] { display:none; }
+  .shopbar { position:sticky; top:0; z-index:1; background:var(--band); color:#fff; padding:12px 16px; }
+  .shopbar .top { display:flex; justify-content:space-between; align-items:center; gap:10px; max-width:760px; margin:0 auto; }
+  .shopbar h2 { margin:0; font-size:1.6rem; }
+  .shopbar button { background:var(--tag); color:var(--tag-ink); border-color:var(--tag); font-weight:700; }
+  .shoptabs { display:flex; gap:6px; overflow-x:auto; max-width:760px; margin:10px auto 0; padding-bottom:2px; }
+  .shoptabs button { background:transparent; color:#fff; border-color:rgba(255,255,255,.45); white-space:nowrap; font-size:.95rem; }
+  .shoptabs button[aria-pressed="true"] { background:#fff; color:#17261C; border-color:#fff; }
+  #shopList { max-width:760px; margin:0 auto; padding:12px 16px 60px; }
+  .shopitem { display:flex; gap:12px; align-items:center; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .shopitem input { width:26px; height:26px; flex:none; accent-color:var(--leaf); }
+  .shopitem .what { flex:1; min-width:0; }
+  .shopitem .what b { display:block; }
+  .shopitem.got .what, .shopitem.got .tag { opacity:.45; } .shopitem.got .what b { text-decoration:line-through; }
+  .shopitem .pic.thumb { pointer-events:none; }
+  .shopdone { margin:18px 0 6px; font-size:1rem; }
+
   @media print {
+    #shop, #shareBar, .view { display:none !important; }
     body { background:#fff; color:#000; }
     header, aside, .noprint, .toolbar { display:none !important; }
     .layout { display:block; padding:0; } .trip { border:0; padding:0; }
@@ -170,6 +214,10 @@
     <div>
       <h1 class="narrow">Pantry</h1>
       <p>This week's store ads, checked against your list.</p>
+      <div class="view">
+        <button id="sizeBtn" aria-pressed="false" title="Make the text bigger">Larger text</button>
+        <button id="contrastBtn" aria-pressed="false" title="Black on white, stronger colours">High contrast</button>
+      </div>
     </div>
     <div class="go">
       <label for="zip">ZIP code or town</label>
@@ -178,6 +226,7 @@
     </div>
   </div>
   <div id="places" hidden></div>
+  <div id="shareBar" hidden></div>
   <div id="status" role="status"></div>
 </header>
 
@@ -190,7 +239,14 @@
       <button class="solid" id="addBtn">Add</button>
     </div>
     <ul class="items" id="items"></ul>
-    <p class="soft" id="empty" style="margin:10px 0 0">Nothing on your list yet. Try "chicken breast".</p>
+    <p class="soft" id="empty" style="margin:10px 0 0">Nothing on your list yet. Tap a regular below, or type your own.</p>
+    <div class="staples" id="staples"></div>
+    <details>
+      <summary>Paste a list or recipe</summary>
+      <textarea id="pasteBox" rows="5" placeholder="One item per line, or separated by commas.&#10;Quantities like &quot;2 cups&quot; are removed."></textarea>
+      <button class="small" id="pasteBtn">Add these items</button>
+      <span class="soft" id="pasteNote"></span>
+    </details>
     <details>
       <summary>How to be specific</summary>
       <p class="soft" style="margin:8px 0 0">Put an exact phrase in quotes: <b>"large eggs"</b>.<br>
@@ -214,6 +270,14 @@
     </div>
   </div>
 
+  <div class="panel tools">
+    <h2 class="narrow">Take it with you</h2>
+    <p class="soft" style="margin:0">Your list is saved in this browser only.</p>
+    <button class="small" id="shareBtn">Copy a link to this list</button>
+    <input type="text" id="shareOut" readonly hidden aria-label="Link to your list">
+    <button class="small" id="remindBtn">Add a Wednesday reminder to my calendar</button>
+  </div>
+
   <div class="panel">
     <details style="margin:0">
       <summary>Trouble loading ads?</summary>
@@ -230,6 +294,13 @@
 <main id="output"></main>
 </div>
 
+<div id="shop" hidden role="dialog" aria-modal="true" aria-labelledby="shopTitle">
+  <div class="shopbar">
+    <div class="top"><h2 class="narrow" id="shopTitle">Shopping mode</h2><button id="shopClose">Done</button></div>
+    <div class="shoptabs" id="shopTabs"></div>
+  </div>
+  <div id="shopList"></div>
+</div>
 <dialog id="zoom"><img alt=""><p id="zoomCap" style="margin:0 0 10px"></p><button id="zoomClose">Close</button></dialog>
 <script>
 "use strict";
@@ -606,6 +677,7 @@ if (typeof document !== "undefined") {
   if (!Array.isArray(state.stores)) state.stores = DEFAULT_STORES.slice();
   if (!Array.isArray(state.nearby)) state.nearby = [];
   if (!Array.isArray(state.other)) state.other = [];
+  if (!state.got || typeof state.got !== "object") state.got = {};
   let finding = false, findNote = "";
   let allDeals = null;       // everything read in the latest check (kept in memory only)
   let sample = null;         // one raw ad entry, for troubleshooting
@@ -636,12 +708,62 @@ if (typeof document !== "undefined") {
   const pic = (d, cls) => `<button class="pic ${cls || ""}" ${d.image ? `data-zoom="${esc(d.image)}" data-cap="${esc(d.store + ": " + d.name)}" aria-label="Enlarge picture of ${esc(d.name)}"` : `tabindex="-1" aria-hidden="true"`}>${
     d.image ? `<img src="${esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</button>`;
 
+  /* ---- text size and contrast */
+  function applyView() {
+    document.documentElement.dataset.size = String(state.size || 0);
+    document.documentElement.dataset.contrast = state.contrast ? "1" : "0";
+    $("sizeBtn").textContent = ["Larger text", "Largest text", "Normal text"][state.size || 0];
+    $("sizeBtn").setAttribute("aria-pressed", state.size ? "true" : "false");
+    $("contrastBtn").setAttribute("aria-pressed", state.contrast ? "true" : "false");
+  }
+  $("sizeBtn").onclick = () => { state.size = ((state.size || 0) + 1) % 3; save(); applyView(); };
+  $("contrastBtn").onclick = () => { state.contrast = !state.contrast; save(); applyView(); };
+
+  /* ---- quick add and paste */
+  const STAPLES = ["milk", "eggs", "bread", "butter", "bananas", "chicken breast", "ground beef", "cheese",
+                   "apples", "coffee", "cereal", "rice", "pasta", "orange juice", "yogurt", "potatoes"];
+  function drawStaples() {
+    const have = new Set(state.items.map(i => i.q.toLowerCase()));
+    const left = STAPLES.filter(x => !have.has(x)).slice(0, 10);
+    $("staples").innerHTML = left.length ? `<span class="soft">Regulars:</span>` + left.map(x =>
+      `<button data-staple="${esc(x)}" aria-label="Add ${esc(x)}">+ ${esc(x)}</button>`).join("") : "";
+  }
+  $("staples").onclick = e => { const t = e.target.closest("button"); if (t) addItems([t.dataset.staple]); };
+  const UNITS = "cups?|c|tablespoons?|tbsps?|tbs|tsps?|teaspoons?|ounces?|oz|fl\\.? ?oz|pounds?|lbs?|grams?|g|kg|ml|liters?|l|quarts?|qts?|pints?|pts?|gallons?|gal|" +
+    "cans?|jars?|bottles?|packages?|pkgs?|packs?|bags?|box(?:es)?|bunch(?:es)?|heads?|cloves?|dozen|doz|sticks?|slices?|pinch(?:es)?|dash(?:es)?|containers?|cartons?|loaf|loaves|x";
+  const QTY = new RegExp("^(?:about\\s+|approx\\.?\\s+)?(?:\\d+(?:[\\/.]\\d+)?|[\\u00bc-\\u00be\\u2150-\\u215e]|(?:a|an|one|two|three|four|five|six|half)(?=\\s))" +
+    "(?:\\s*(?:-|to)\\s*\\d+(?:[\\/.]\\d+)?)?(?:\\s*\\([^)]*\\))?\\s*(?:(?:" + UNITS + ")\\.?\\b\\s*)?(?:of\\s+)?(?:(?:large|medium|small|whole)\\s+)?", "i");
+  function cleanLine(t) {
+    let x = String(t).replace(/^\s*(?:[-*\u2022\u25e6\u25aa\u2013]|\[[ xX]?\]|\d+[.)])\s*/, "").trim();
+    for (let i = 0; i < 2; i++) x = x.replace(QTY, "").trim();
+    x = x.replace(/\([^)]*\)/g, " ").replace(/\s+(?:to taste|as needed|optional)$/i, "").replace(/\s+/g, " ").trim();
+    return x.replace(/^[,.;:\-\s]+|[,.;:\-\s]+$/g, "").slice(0, 80);
+  }
+  function splitPaste(text) {
+    const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const parts = lines.length > 1 ? lines.map(l => l.split(",")[0]) : (lines[0] || "").split(/[,;]/);
+    return parts.map(cleanLine).filter(x => x.length > 1);
+  }
+  function addItems(list) {
+    const have = new Set(state.items.map(i => i.q.toLowerCase()));
+    let n = 0;
+    list.forEach(v => { if (v && !have.has(v.toLowerCase())) { have.add(v.toLowerCase()); state.items.push({ q: v, hide: [] }); n++; } });
+    if (n) { save(); drawList(); draw(); }
+    return n;
+  }
+  $("pasteBtn").onclick = () => {
+    const found = splitPaste($("pasteBox").value), n = addItems(found);
+    $("pasteNote").textContent = !found.length ? " Nothing to add." : n ? ` Added ${n} item${n > 1 ? "s" : ""}.` : " Those are already on your list.";
+    if (n) $("pasteBox").value = "";
+  };
+
   /* ---- list */
   function drawList() {
     $("items").innerHTML = state.items.map((it, i) => i === editing
       ? `<li><input type="text" id="editBox" value="${esc(it.q)}" aria-label="Edit item"></li>`
       : `<li><button class="name" data-edit="${i}" title="Click to edit">${esc(it.q)}</button><button class="del" data-del="${i}" title="Remove" aria-label="Remove ${esc(it.q)}">&times;</button></li>`).join("");
     $("empty").hidden = state.items.length > 0;
+    drawStaples();
     const box = $("editBox");
     if (box) {
       box.focus(); box.select();
@@ -784,6 +906,7 @@ if (typeof document !== "undefined") {
       const out = await checkPrices(state.zip, state.items.map(i => i.q), selectedStores());
       allDeals = out.failedCompletely ? null : out.deals; sample = out.sample;
       state.nearby = [...new Set([...state.nearby, ...out.nearby])].sort((a, b) => a.localeCompare(b));
+      state.got = {};
       state.last = { when: Date.now(), zip: state.zip, results: out.results, status: out.status,
                      warnings: out.warnings, failed: out.failedCompletely };
       save(); drawStores(); draw();
@@ -816,6 +939,139 @@ if (typeof document !== "undefined") {
     const others = c.priced.slice(1, 4).map(x => `${esc(x.store)} ${money(x.d.unit_price)}`).join(", ");
     return `<span class="vs"><b>Saves ${money(c.save)}</b> vs next best. Others: ${others}</span>`;
   }
+  /* The newest week of ads starts on Wednesday for most stores. */
+  function adsAreOld() {
+    if (!state.last) return false;
+    const now = new Date(), wed = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() - 3 + 7) % 7));
+    return state.last.when < wed.getTime();
+  }
+  /* Best single store and best pair of stores, against buying each item wherever it is cheapest. */
+  function stopsOptions(rows, sel) {
+    const items = rows.filter(r => r.best);
+    const used = sel.filter(s => items.some(r => r.best.store === s));
+    if (items.length < 2 || used.length < 2) return null;
+    const priceAt = (r, s) => { const d = (r.stores[s] || []).find(x => x.unit_price !== null); return d ? d.unit_price : null; };
+    const evalSet = set => {
+      let cost = 0, extra = 0; const miss = [];
+      items.forEach(r => {
+        let m = null;
+        set.forEach(s => { const pr = priceAt(r, s); if (pr !== null && (m === null || pr < m)) m = pr; });
+        if (m === null) miss.push(r.item); else { cost += m; extra += m - r.best.unit_price; }
+      });
+      return { set, cost, extra: Math.round(extra * 100) / 100, miss, covered: items.length - miss.length };
+    };
+    const rank = (a, b) => b.covered - a.covered || a.extra - b.extra || a.cost - b.cost;
+    const ones = sel.map(s => evalSet([s])).sort(rank);
+    const twos = [];
+    for (let i = 0; i < sel.length; i++) for (let j = i + 1; j < sel.length; j++) twos.push(evalSet([sel[i], sel[j]]));
+    twos.sort(rank);
+    return { items: items.length, used, allCost: items.reduce((a, r) => a + r.best.unit_price, 0),
+             one: ones[0], two: used.length > 2 ? twos[0] : null };
+  }
+
+  /* ---- shopping mode: one store at a time, big text, tap to tick off */
+  let shopTab = null;
+  function shopData() {
+    const rows = current(), plan = planOf(rows), sel = selectedStores();
+    const tabs = sel.filter(s => plan[s]).map(s => ({ id: s, label: s, list: plan[s].map(r => ({ key: r.item + "|" + r.best.name, r, d: r.best })) }));
+    const rest = rows.filter(r => !r.pending && !r.best).map(r => ({ key: r.item + "|", r, d: null }));
+    if (rest.length) tabs.push({ id: "*", label: "No deal this week", list: rest });
+    return tabs;
+  }
+  function drawShop() {
+    const tabs = shopData();
+    if (!tabs.find(t => t.id === shopTab)) shopTab = tabs.length ? tabs[0].id : null;
+    $("shopTabs").innerHTML = tabs.map(t => {
+      const done = t.list.filter(x => state.got[x.key]).length;
+      return `<button data-tab="${esc(t.id)}" aria-pressed="${t.id === shopTab}">${esc(t.label)} ${done}/${t.list.length}</button>`;
+    }).join("");
+    const tab = tabs.find(t => t.id === shopTab);
+    if (!tab) { $("shopList").innerHTML = `<p>Nothing to shop for yet.</p>`; return; }
+    const todo = tab.list.filter(x => !state.got[x.key]), got = tab.list.filter(x => state.got[x.key]);
+    const row = x => `<label class="shopitem${state.got[x.key] ? " got" : ""}"><input type="checkbox" data-got="${esc(x.key)}"${state.got[x.key] ? " checked" : ""}>
+      ${x.d ? pic(x.d, "thumb") : ""}<span class="what"><b>${esc(x.r.item)}</b><span class="soft">${x.d ? esc(x.d.name) : "Not on sale at your stores; buy wherever is handy"}</span></span>${x.d ? tag(x.d) : ""}</label>`;
+    $("shopList").innerHTML = (tab.id === "*" ? "" : `<p class="soft" style="margin:4px 0 6px">Buy these at ${esc(tab.label)}.</p>`)
+      + todo.map(row).join("")
+      + (got.length ? `<p class="shopdone soft">In the cart</p>` + got.map(row).join("") : "")
+      + (!todo.length ? `<p style="margin:16px 0"><b>All done here.</b></p>` : "")
+      + `<p style="margin:20px 0 0"><button class="link" id="shopReset">Untick everything</button></p>`;
+  }
+  function openShop() { $("shop").hidden = false; document.body.style.overflow = "hidden"; drawShop(); $("shopClose").focus(); }
+  function closeShop() { $("shop").hidden = true; document.body.style.overflow = ""; }
+  $("shopClose").onclick = closeShop;
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("shop").hidden) closeShop(); });
+  $("shopTabs").onclick = e => { const t = e.target.closest("button"); if (t) { shopTab = t.dataset.tab; drawShop(); $("shop").scrollTop = 0; } };
+  $("shopList").onchange = e => { const k = e.target.dataset.got; if (k === undefined) return;
+    if (e.target.checked) state.got[k] = 1; else delete state.got[k]; save(); drawShop(); };
+  $("shopList").onclick = e => { if (e.target.id === "shopReset") { state.got = {}; save(); drawShop(); } };
+
+  /* ---- share or move the list: everything travels in the link itself, nothing is uploaded */
+  const b64e = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const b64d = str => decodeURIComponent(escape(atob(str.replace(/-/g, "+").replace(/_/g, "/"))));
+  $("shareBtn").onclick = async () => {
+    if (!state.items.length) { $("shareOut").hidden = false; $("shareOut").value = "Add items to your list first."; return; }
+    const pack = { v: 1, i: state.items.map(i => [i.q, i.only || [], i.hide || []]), z: state.zip, p: state.place, s: state.stores };
+    const url = location.href.split("#")[0] + "#list=" + b64e(JSON.stringify(pack));
+    $("shareOut").hidden = false; $("shareOut").value = url; $("shareOut").select();
+    let ok = false;
+    try { await navigator.clipboard.writeText(url); ok = true; } catch (e) { try { ok = document.execCommand("copy"); } catch (e2) {} }
+    $("shareBtn").textContent = ok ? "Link copied. Open it on another device" : "Copy the link below";
+    setTimeout(() => { $("shareBtn").textContent = "Copy a link to this list"; }, 2500);
+  };
+  function readShared() {
+    const m = location.hash.match(/list=([A-Za-z0-9_-]+)/);
+    if (!m) return;
+    let pack;
+    try { pack = JSON.parse(b64d(m[1])); } catch (e) { pack = null; }
+    history.replaceState(null, "", location.href.split("#")[0]);
+    if (!pack || !Array.isArray(pack.i)) { say("That list link is damaged, so it couldn't be opened."); return; }
+    const items = pack.i.filter(x => Array.isArray(x) && typeof x[0] === "string" && x[0].trim()).slice(0, 200)
+      .map(x => ({ q: x[0].trim().slice(0, 80), only: (x[1] || []).map(String).slice(0, 50), hide: (x[2] || []).map(String).slice(0, 50) }));
+    if (!items.length) return;
+    const bar = $("shareBar");
+    bar.innerHTML = `<p style="margin:0 0 8px"><b>Someone shared a list with ${items.length} item${items.length > 1 ? "s" : ""}:</b> ${items.slice(0, 6).map(i => esc(i.q)).join(", ")}${items.length > 6 ? "\u2026" : ""}</p>
+      <div class="row"><button data-share="add">Add to my list</button><button data-share="replace">Replace my list</button><button data-share="no">Ignore</button></div>`;
+    bar.hidden = false;
+    bar.onclick = e => {
+      const t = e.target.closest("button"); if (!t) return;
+      if (t.dataset.share !== "no") {
+        if (t.dataset.share === "replace") {
+          state.items = items;
+          if (typeof pack.z === "string" && /^\d{5}$/.test(pack.z)) { state.zip = pack.z; state.place = typeof pack.p === "string" ? pack.p.slice(0, 60) : ""; state.nearby = []; state.other = []; }
+          if (Array.isArray(pack.s) && pack.s.length) state.stores = pack.s.map(String).slice(0, 30);
+          state.last = null; state.got = {};
+        } else {
+          const have = new Set(state.items.map(i => i.q.toLowerCase()));
+          items.forEach(i => { if (!have.has(i.q.toLowerCase())) state.items.push(i); });
+        }
+        save(); $("zip").value = state.place || state.zip; drawList(); drawStores(); draw();
+        if (/^\d{5}$/.test(state.zip) && !state.nearby.length) autoFind();
+        say(t.dataset.share === "replace" ? "Shared list opened. Click \u201cCheck this week's ads\u201d." : "Shared items added to your list.");
+      }
+      bar.hidden = true; bar.innerHTML = "";
+    };
+  }
+
+  /* ---- weekly reminder as a calendar file (works with Google, Apple and Outlook calendars) */
+  $("remindBtn").onclick = () => {
+    const now = new Date(), d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ((3 - now.getDay() + 7) % 7 || 7), 9, 0);
+    const p2 = n => String(n).padStart(2, "0");
+    const stampOf = x => `${x.getFullYear()}${p2(x.getMonth() + 1)}${p2(x.getDate())}T${p2(x.getHours())}${p2(x.getMinutes())}00`;
+    const page = /^https?:/.test(location.protocol) ? location.href.split("#")[0] : "";
+    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Pantry//Weekly ads//EN", "BEGIN:VEVENT",
+      "UID:pantry-weekly-" + Date.now() + "@pantry", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z",
+      "DTSTART:" + stampOf(d), "DURATION:PT15M", "RRULE:FREQ=WEEKLY;BYDAY=WE",
+      "SUMMARY:New grocery ads are out", "DESCRIPTION:Check this week's ads against your list." + (page ? "\\n" + page : ""),
+      ...(page ? ["URL:" + page] : []),
+      "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:New grocery ads are out", "TRIGGER:PT0M", "END:VALARM",
+      "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([ics], { type: "text/calendar;charset=utf-8" }));
+    a.download = "weekly-grocery-ads.ics"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    say("Calendar reminder downloaded. Open the file to add a repeating Wednesday 9 AM reminder.");
+  };
+
   function planOf(rows) {
     const plan = {};
     rows.forEach(r => { if (r.best) (plan[r.best.store] || (plan[r.best.store] = [])).push(r); });
@@ -836,13 +1092,15 @@ if (typeof document !== "undefined") {
     const missing = rows.filter(r => !r.pending && !Object.keys(r.stores).length).map(r => r.item);
     const unpriced = rows.filter(r => !r.pending && Object.keys(r.stores).length && !r.best).map(r => r.item);
     const pending = rows.filter(r => r.pending).map(r => r.item);
+    const stale = rows.filter(r => r.stalePicks).map(r => r.item);
+    if (adsAreOld()) h = `<div class="warn noprint"><b>New ads are out.</b> These results are from ${esc(new Date(last.when).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }))}, before this week's ads started. Click \u201cCheck this week's ads\u201d for current prices.</div>` + h;
 
     /* where to buy */
     h += `<section class="trip"><h2 class="narrow">Where to buy</h2>
       <p class="soft" style="margin:0">Cheapest advertised price for each item. Ads checked ${esc(new Date(last.when).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }))}.</p>`;
     sel.filter(s => plan[s]).forEach(s => {
       h += `<h3 class="narrow">${esc(s)} <span>${plan[s].length} item${plan[s].length > 1 ? "s" : ""}</span></h3>` + plan[s].map(r =>
-        `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}</span>${vsLine(compareOf(r, sel))}</div>${tag(r.best)}</div>`).join("");
+        `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}${r.picked ? " (your pick)" : ""}</span>${vsLine(compareOf(r, sel))}</div>${tag(r.best)}</div>`).join("");
     });
     if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">No priced deals for your items at the stores you ticked.</p>`;
     else {
@@ -851,15 +1109,29 @@ if (typeof document !== "undefined") {
       if (total > 0.004) h += `<p style="margin:14px 0 0"><b>About ${money(total)} saved</b> <span class="soft">compared with buying each item at its next-cheapest store (one of each, advertised prices only).</span></p>`;
     }
     const aside = (title, list, extra) => list.length ? `<p style="margin:14px 0 0"><b>${title}:</b> ${list.map(esc).join(", ")}${extra || ""}</p>` : "";
+    h += aside("Your usual pick isn't on sale this week, so other matches are shown", stale);
     h += aside("On sale, but the ad prints no price", unpriced);
     h += aside("Not in these stores' ads this week", missing);
     h += aside("Not checked yet", pending, ". Click “Check this week's ads”.");
     h += `<div class="row toolbar">
+        ${Object.keys(plan).length ? `<button class="small solid" data-do="shop">Shopping mode</button>` : ""}
         <button class="small" data-do="print">Print</button>
         <button class="small" data-do="copy">Copy as text</button>
         <button class="small" data-do="csv">Export matches (spreadsheet)</button>
         ${allDeals ? `<button class="small" data-do="csvall">Export everything the ads returned</button>` : ""}
       </div></section>`;
+
+    /* fewer stops */
+    const so = stopsOptions(rows, sel);
+    if (so) {
+      const optHtml = (o, label, cls) => `<div class="opt ${cls || ""}"><b>${label}</b><span class="cost">${money(o.cost)}</span>
+        <span class="soft">${o.covered} of ${so.items} items${o.extra > 0.004 ? `, ${money(o.extra)} more than the lowest prices for those items` : ", at the lowest prices"}${o.miss.length ? `. Not advertised there: ${o.miss.map(esc).join(", ")}` : ""}.</span></div>`;
+      h += `<section class="panel stops noprint"><h2 class="narrow">Fewer stops</h2>
+        <p class="soft" style="margin:0 0 4px">Getting every lowest price takes ${so.used.length} stops. Here is what fewer stops would cost (one of each item, advertised prices).</p>`
+        + optHtml({ cost: so.allCost, covered: so.items, extra: 0, miss: [] }, `${so.used.length} stops: ${so.used.map(esc).join(", ")}`, "now")
+        + (so.two ? optHtml(so.two, `2 stops: ${so.two.set.map(esc).join(" and ")}`) : "")
+        + optHtml(so.one, `1 stop: ${esc(so.one.set[0])}`) + `</section>`;
+    }
 
     /* one section per list item, offers cheapest first */
     rows.forEach((r, idx) => {
@@ -1045,6 +1317,7 @@ if (typeof document !== "undefined") {
   }
   $("output").onclick = e => {
     const t = e.target.closest("button"); if (!t) return;
+    if (t.dataset.do === "shop") { openShop(); return; }
     if (t.dataset.zoom) {
       $("zoom").querySelector("img").src = t.dataset.zoom; $("zoomCap").textContent = t.dataset.cap || "";
       if ($("zoom").showModal) $("zoom").showModal(); else window.open(t.dataset.zoom, "_blank", "noopener");
@@ -1069,10 +1342,10 @@ if (typeof document !== "undefined") {
 
   /* ---- start */
   $("zip").value = state.place || state.zip; $("relay").checked = useRelay = !!state.relay;
-  drawList(); drawStores(); draw();
+  applyView(); drawList(); drawStores(); draw(); readShared();
   if (/^\d{5}$/.test(state.zip) && !state.nearby.length && !state.other.length) autoFind();
-  if (state.last && !state.last.failed)
-    say("Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
+  if (state.last && !state.last.failed && !$("status").textContent)
+    say(adsAreOld() ? "New ads are out since your last check. Click \u201cCheck this week's ads\u201d." : "Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
 }
 if (typeof module !== "undefined") module.exports = { kinds, findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
 </script></body></html>
