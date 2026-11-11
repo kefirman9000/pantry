@@ -221,7 +221,7 @@
     </div>
     <div class="go">
       <label for="zip">ZIP code or town</label>
-      <input type="text" id="zip" maxlength="60" placeholder="27601 or Apex, NC" autocomplete="off">
+      <input type="text" id="zip" maxlength="60" placeholder="ZIP code or town, state" autocomplete="off">
       <button id="checkBtn">Check this week's ads</button>
     </div>
   </div>
@@ -362,7 +362,7 @@ const STATES = { AL:"Alabama", AK:"Alaska", AZ:"Arizona", AR:"Arkansas", CA:"Cal
   OR:"Oregon", PA:"Pennsylvania", RI:"Rhode Island", SC:"South Carolina", SD:"South Dakota", TN:"Tennessee", TX:"Texas",
   UT:"Utah", VT:"Vermont", VA:"Virginia", WA:"Washington", WV:"West Virginia", WI:"Wisconsin", WY:"Wyoming" };
 const abbrOf = full => Object.keys(STATES).find(k => STATES[k] === full) || "";
-/* "Apex, NC" / "Apex NC" / "Apex, North Carolina" / "Apex" -> { city, state } */
+/* "Town, ST" / "Town ST" / "Town, State" / "Town" -> { city, state } */
 function parsePlace(text) {
   let city = String(text).replace(/\s+/g, " ").trim().replace(/,$/, ""), state = "";
   const parts = city.split(",").map(x => x.trim());
@@ -668,6 +668,7 @@ function view(results, items, selected) {
 }
 
 /* ------------------------------------------------------------------- page */
+const EXAMPLE = { town: "Dayton, OH" };
 if (typeof document !== "undefined") {
   const KEY = "groceryDealFinder";
   let state = { zip: "", items: [], stores: DEFAULT_STORES.slice(), nearby: [], other: [], place: "", relay: false, last: null };
@@ -885,7 +886,7 @@ if (typeof document !== "undefined") {
     try { list = await findPlaces(v); }
     catch (e) { say(`Couldn't look up that town (${e.message}). Type a 5-digit ZIP code instead.`); return false; }
     if ($("zip").value.trim() !== v) return false;            // they kept typing
-    if (!list.length) { say(`Couldn't find a US town called \u201c${v}\u201d. Check the spelling, add the state (Apex, NC), or type a ZIP code.`); return false; }
+    if (!list.length) { say(`Couldn't find a US town called \u201c${v}\u201d. Check the spelling, add the state (${EXAMPLE.town}), or type a ZIP code.`); return false; }
     if (list.length === 1) return usePlace(list[0]);
     showPlaces(list, v); say("");
     return false;
@@ -1340,7 +1341,14 @@ if (typeof document !== "undefined") {
   $("zoomClose").onclick = () => $("zoom").close();
   $("zoom").onclick = e => { if (e.target === $("zoom")) $("zoom").close(); };
 
-  /* ---- start */
+  /* ---- start: a different example in the ZIP box each visit */
+  const EXAMPLES = [["Boise, ID", "83702"], ["Dayton, OH", "45402"], ["Tulsa, OK", "74103"], ["Fresno, CA", "93721"],
+    ["Lansing, MI", "48933"], ["Savannah, GA", "31401"], ["Spokane, WA", "99201"], ["Madison, WI", "53703"],
+    ["Knoxville, TN", "37902"], ["Albany, NY", "12207"], ["Reno, NV", "89501"], ["Lubbock, TX", "79401"],
+    ["Portland, ME", "04101"], ["Billings, MT", "59101"], ["Mobile, AL", "36602"], ["Omaha, NE", "68102"]];
+  const pickEx = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+  EXAMPLE.town = pickEx[0];
+  $("zip").placeholder = `${pickEx[1]} or ${pickEx[0]}`;
   $("zip").value = state.place || state.zip; $("relay").checked = useRelay = !!state.relay;
   applyView(); drawList(); drawStores(); draw(); readShared();
   if (/^\d{5}$/.test(state.zip) && !state.nearby.length && !state.other.length) autoFind();
