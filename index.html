@@ -365,6 +365,7 @@ function makeDeal(raw, store, validFrom, validTo) {
            valid_to: String(raw.valid_to || validTo || ""),
            image: picture(raw),
            fine: fine.filter(t => t !== story && t !== pre && t !== post).join(" | ").slice(0, 300),
+           _id: String(raw.flyer_item_id || raw.id || ""), _raw: raw, _rich: !!(pre || post || story),
            _text: [raw.name, raw.brand, raw.description].map(x => x || "").join(" ") };
 }
 
@@ -409,8 +410,13 @@ async function checkPrices(zip, queries, selected) {
   let failed = 0, attempted = 0, blocked = 0;
   const details = new Set();
   const note = (what, err) => { failed++; if (err.blocked) blocked++; details.add(what + ": " + err.message); };
-  const add = d => {
+  const byId = new Map();
+  const add = (d, fromSearch) => {
     if (!d) return;
+    // The same ad entry can arrive twice: once in the store's full ad and once from the item search.
+    // The search copy carries the price wording ("2/", "lb", card notes), so it wins.
+    if (d._id && byId.has(d.store + d._id)) { if (fromSearch) Object.assign(byId.get(d.store + d._id), d); return; }
+    if (d._id) byId.set(d.store + d._id, d);
     const key = d.store + "|" + d.name.toLowerCase() + "|" + d.unit_price;
     if (seen.has(key)) return;
     seen.add(key); deals.push(d); nearby.add(d.store);
@@ -452,7 +458,7 @@ async function checkPrices(zip, queries, selected) {
     rows.forEach(raw => {
       const store = storeName(raw.merchant_name || raw.merchant);
       if (!store) return;
-      add(makeDeal(raw, store));
+      add(makeDeal(raw, store), true);
       const fid = raw.flyer_id == null ? "" : String(raw.flyer_id);
       if (fid && sel.has(store) && !seenFlyers.has(fid) && more.length < 16) {
         seenFlyers.add(fid); more.push({ id: fid, store, valid_from: raw.valid_from, valid_to: raw.valid_to });
@@ -481,10 +487,26 @@ async function checkPrices(zip, queries, selected) {
   const results = queries.map((item, i) => {
     const stores = {};
     deals.forEach(d => { if (matches(parsed[i], d)) (stores[d.store] || (stores[d.store] = [])).push(d); });
-    Object.values(stores).forEach(l => l.sort(byPrice));
     return { item, stores };
   });
-  return { results, deals, status, warnings, sample, nearby: [...nearby].sort((a, b) => a.localeCompare(b)),
+
+  // 5) Full ads leave out the price wording. For matched deals that lack it, ask for the entry's details.
+  let detail = null;
+  const thin = [...new Set(results.flatMap(r => selected.flatMap(s => r.stores[s] || [])))].filter(d => !d._rich && d._id).slice(0, 40);
+  const enrich = async d => {
+    const [got, e] = await safe(getJson(`${API}/items/${encodeURIComponent(d._id)}?locale=en-us`).then(x => [x]));
+    const obj = !e && got[0] && typeof got[0] === "object" ? (got[0].item && typeof got[0].item === "object" ? got[0].item : got[0]) : null;
+    if (!obj || Array.isArray(obj)) return false;
+    if (!detail) detail = obj;
+    const better = makeDeal(Object.assign({}, d._raw, obj, { name: d.name }), d.store, d.valid_from, d.valid_to);
+    if (better && (better.unit_price !== null || d.unit_price === null)) Object.assign(d, better, { image: d.image || better.image });
+    return true;
+  };
+  if (thin.length && await enrich(thin[0]))
+    for (let i = 1; i < thin.length; i += 8) await Promise.all(thin.slice(i, i + 8).map(enrich));
+  results.forEach(r => Object.values(r.stores).forEach(l => l.sort(byPrice)));
+
+  return { results, deals, status, warnings, sample: sample ? { full_ad_entry: sample, entry_details: detail } : null, nearby: [...nearby].sort((a, b) => a.localeCompare(b)),
            failedCompletely: !deals.length && failed === attempted };
 }
 
@@ -783,7 +805,7 @@ if (typeof document !== "undefined") {
       const st = last.status[s];
       return `${esc(s)}: ${st && st.items ? st.items + (st.items === 1 ? " deal" : " deals") + (st.valid_to ? ", through " + day(st.valid_to) : "") : "none"}`;
     }).join(". ") + `.<br>Weekly ads list sale items only, and sizes differ between stores, so check the product named on each deal. Some prices need the store's loyalty card. Town lookup uses GeoNames data via Open-Meteo.</p>`;
-    if (sample) h += `<details class="noprint"><summary>Technical details for troubleshooting</summary><pre>${esc(JSON.stringify(sample, null, 1).slice(0, 2500))}</pre></details>`;
+    if (sample) h += `<details class="noprint"><summary>Technical details for troubleshooting</summary><pre>${esc(JSON.stringify(sample, null, 1).slice(0, 5000))}</pre></details>`;
     $("output").innerHTML = h;
     if (allDeals && $("browseFilter")) { $("browseFilter").oninput = $("browseMine").onchange = drawBrowse; drawBrowse(); }
   }
