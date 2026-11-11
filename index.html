@@ -26,8 +26,13 @@
   header p { margin:4px 0 0; color:#C9DBCF; font-size:.95rem; }
   .go { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .go label { color:#C9DBCF; font-size:.9rem; }
-  #zip { width:96px; background:#fff; color:#17261C; border-color:transparent; font-weight:600; }
+  #zip { width:170px; background:#fff; color:#17261C; border-color:transparent; font-weight:600; }
   #checkBtn { background:var(--tag); color:var(--tag-ink); border-color:var(--tag); font-weight:700; padding:10px 18px; }
+  #places { max-width:1200px; margin:0 auto; padding:0 16px 12px; }
+  #places p { margin:0 0 8px; font-weight:600; }
+  #places .opts { display:flex; flex-wrap:wrap; gap:8px; }
+  #places button { background:#fff; color:#17261C; border-color:#fff; text-align:left; line-height:1.25; }
+  #places button span { display:block; font-size:.82rem; color:#55665B; }
   #status { max-width:1200px; margin:0 auto; padding:0 16px 12px; color:#C9DBCF; font-size:.9rem; min-height:1.2em; }
 
   .layout { max-width:1200px; margin:0 auto; padding:22px 16px 60px; display:grid;
@@ -131,11 +136,12 @@
       <p>This week's store ads, checked against your list.</p>
     </div>
     <div class="go">
-      <label for="zip">Store ZIP code</label>
-      <input type="text" id="zip" inputmode="numeric" maxlength="5" placeholder="27601">
+      <label for="zip">ZIP code or town</label>
+      <input type="text" id="zip" maxlength="60" placeholder="27601 or Apex, NC" autocomplete="off">
       <button id="checkBtn">Check this week's ads</button>
     </div>
   </div>
+  <div id="places" hidden></div>
   <div id="status" role="status"></div>
 </header>
 
@@ -202,9 +208,9 @@ const IGNORED_WORDS = new Set(["a", "an", "the", "of", "and", "or", "for", "with
 let useRelay = false;
 
 /* ------------------------------------------------------- fetching the ads */
-async function getJson(url) {
+async function getJson(url, direct) {
   let r;
-  try { r = await fetch(useRelay ? RELAY + encodeURIComponent(url) : url); }
+  try { r = await fetch(useRelay && !direct ? RELAY + encodeURIComponent(url) : url); }
   catch (e) { const err = new Error("blocked or no connection"); err.blocked = true; throw err; }
   if (!r.ok) throw new Error("error " + r.status);
   const text = await r.text();
@@ -240,6 +246,58 @@ async function fetchSearch(zip, q) {
   return ((data && data.items) || []).filter(i => i && typeof i === "object");
 }
 const safe = p => p.then(v => [v, null], e => [[], e]);
+/* ---- towns: look a place name up and get a ZIP code for it */
+const STATES = { AL:"Alabama", AK:"Alaska", AZ:"Arizona", AR:"Arkansas", CA:"California", CO:"Colorado", CT:"Connecticut",
+  DE:"Delaware", DC:"District of Columbia", FL:"Florida", GA:"Georgia", HI:"Hawaii", ID:"Idaho", IL:"Illinois", IN:"Indiana",
+  IA:"Iowa", KS:"Kansas", KY:"Kentucky", LA:"Louisiana", ME:"Maine", MD:"Maryland", MA:"Massachusetts", MI:"Michigan",
+  MN:"Minnesota", MS:"Mississippi", MO:"Missouri", MT:"Montana", NE:"Nebraska", NV:"Nevada", NH:"New Hampshire",
+  NJ:"New Jersey", NM:"New Mexico", NY:"New York", NC:"North Carolina", ND:"North Dakota", OH:"Ohio", OK:"Oklahoma",
+  OR:"Oregon", PA:"Pennsylvania", RI:"Rhode Island", SC:"South Carolina", SD:"South Dakota", TN:"Tennessee", TX:"Texas",
+  UT:"Utah", VT:"Vermont", VA:"Virginia", WA:"Washington", WV:"West Virginia", WI:"Wisconsin", WY:"Wyoming" };
+const abbrOf = full => Object.keys(STATES).find(k => STATES[k] === full) || "";
+/* "Apex, NC" / "Apex NC" / "Apex, North Carolina" / "Apex" -> { city, state } */
+function parsePlace(text) {
+  let city = String(text).replace(/\s+/g, " ").trim().replace(/,$/, ""), state = "";
+  const parts = city.split(",").map(x => x.trim());
+  if (parts.length > 1) {
+    const last = parts[parts.length - 1];
+    const full = STATES[last.toUpperCase()] || Object.values(STATES).find(x => x.toLowerCase() === last.toLowerCase());
+    if (full) { state = full; city = parts.slice(0, -1).join(", "); }
+  } else {
+    const m = city.match(/^(.+)\s([A-Za-z]{2})$/);
+    if (m && STATES[m[2].toUpperCase()] && m[2] === m[2].toUpperCase()) { city = m[1]; state = STATES[m[2].toUpperCase()]; }
+  }
+  return { city, state };
+}
+async function findPlaces(text) {
+  const { city, state } = parsePlace(text);
+  if (city.length < 2) return [];
+  const data = await getJson("https://geocoding-api.open-meteo.com/v1/search?count=30&language=en&format=json&countryCode=US&name="
+                             + encodeURIComponent(city), true);
+  let list = ((data && data.results) || []).filter(r => r && r.name && r.admin1 && (!r.country_code || r.country_code === "US")
+    && (!r.feature_code || /^PPL/.test(r.feature_code)));
+  if (state) list = list.filter(r => r.admin1 === state);
+  const exact = list.filter(r => r.name.toLowerCase() === city.toLowerCase());
+  if (exact.length) list = exact;
+  const seen = new Set(), out = [];
+  list.sort((a, b) => (b.population || 0) - (a.population || 0)).forEach(r => {
+    const key = r.name + "|" + r.admin1 + "|" + (r.admin2 || "");
+    if (seen.has(key)) return; seen.add(key);
+    const zips = (r.postcodes || []).filter(z => /^\d{5}$/.test(z));
+    out.push({ name: r.name, state: r.admin1, county: r.admin2 || "", label: r.name + ", " + (abbrOf(r.admin1) || r.admin1), zip: zips[0] || "" });
+  });
+  return out.slice(0, 8);
+}
+/* A place the first lookup gave no ZIP for: ask a ZIP directory instead. */
+async function zipFor(place) {
+  if (place.zip) return place.zip;
+  const ab = abbrOf(place.state);
+  if (!ab) return "";
+  const data = await getJson(`https://api.zippopotam.us/us/${ab.toLowerCase()}/${encodeURIComponent(place.name.toLowerCase())}`, true);
+  const z = ((data && data.places) || []).map(p => p["post code"]).find(z => /^\d{5}$/.test(z || ""));
+  return z || "";
+}
+
 /* Stores near a ZIP: everyone with an ad there, plus a few everyday searches to tell which ones sell groceries. */
 const PROBES = ["milk", "bread", "chicken", "cereal"];
 async function findStores(zip) {
@@ -452,7 +510,7 @@ function view(results, items, selected) {
 /* ------------------------------------------------------------------- page */
 if (typeof document !== "undefined") {
   const KEY = "groceryDealFinder";
-  let state = { zip: "", items: [], stores: DEFAULT_STORES.slice(), nearby: [], other: [], relay: false, last: null };
+  let state = { zip: "", items: [], stores: DEFAULT_STORES.slice(), nearby: [], other: [], place: "", relay: false, last: null };
   try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
   if (!Array.isArray(state.items)) state.items = [];
   state.items = state.items.map(i => typeof i === "string" ? { q: i, hide: [] } : i).filter(i => i && i.q);
@@ -533,11 +591,10 @@ if (typeof document !== "undefined") {
     $("otherBoxes").innerHTML = other.map(s => box(s, false)).join("");
     $("moreStores").hidden = !other.length;
     $("otherSum").textContent = `${other.length} other store${other.length === 1 ? "" : "s"} with ads (not all sell groceries)`;
-    const zipOk = /^\d{5}$/.test(state.zip);
-    $("nearbyNote").textContent = finding ? `Looking for stores near ${state.zip}\u2026`
+        $("nearbyNote").textContent = finding ? `Looking for stores near ${here()}\u2026`
       : findNote ? findNote
-      : near.length ? `Also advertising groceries near ${state.zip}:`
-      : zipOk ? "" : "Enter your ZIP code at the top and the stores near you appear here.";
+      : near.length ? `Also advertising groceries near ${here()}:`
+      : zipOk() ? "" : "Enter your ZIP code or town at the top and the stores near you appear here.";
     $("nearbyNote").hidden = !$("nearbyNote").textContent;
   }
   function toggleStore(name, on) {
@@ -569,22 +626,68 @@ if (typeof document !== "undefined") {
     } else findNote = `Couldn't load the stores near ${zip} (${found.error}). Run a check and the stores advertising your items appear here, or add one by name.`;
     drawStores();
   }
-  function readZip() {
-    const z = $("zip").value.trim(), ok = /^\d{5}$/.test(z);
-    if (z !== state.zip) {
-      state.zip = z; state.nearby = []; state.other = []; finding = false; findNote = "";
-      save(); drawStores(); if (ok) autoFind();
-    }
-    return ok;
+  const zipOk = () => /^\d{5}$/.test(state.zip);
+  const here = () => state.place ? `${state.place} (${state.zip})` : state.zip;
+  function setZip(zip, place) {
+    const changed = zip !== state.zip;
+    state.place = place || "";
+    if (changed) { state.zip = zip; state.nearby = []; state.other = []; finding = false; findNote = ""; }
+    save(); $("zip").value = state.place || state.zip; hidePlaces();
+    if (changed) { drawStores(); if (zipOk()) autoFind(); }
   }
-  $("zip").onchange = readZip;
+  let choices = [], checkAfterPick = false;
+  function hidePlaces() { choices = []; $("places").hidden = true; $("places").innerHTML = ""; }
+  function showPlaces(list, typed) {
+    choices = list;
+    $("places").innerHTML = `<p>More than one place is called \u201c${esc(typed)}\u201d. Which one?</p><div class="opts">` + list.map((c, i) =>
+      `<button data-place="${i}">${esc(c.label)}${c.county ? `<span>${esc(c.county)}</span>` : ""}</button>`).join("") + `</div>`;
+    $("places").hidden = false;
+    const first = $("places").querySelector("button"); if (first) first.focus();
+  }
+  async function usePlace(c) {
+    let zip = "";
+    try { zip = await zipFor(c); } catch (e) {}
+    if (!zip) { hidePlaces(); say(`Found ${c.label}, but couldn't get a ZIP code for it. Type a ZIP code instead.`); return false; }
+    setZip(zip, c.label); say(`Using ZIP code ${zip} for ${c.label}. Type a ZIP code instead if your stores are in a different part of town.`);
+    return true;
+  }
+  $("places").onclick = async e => {
+    const t = e.target.closest("button"); if (!t || !choices[+t.dataset.place]) return;
+    const again = checkAfterPick; checkAfterPick = false;
+    if (await usePlace(choices[+t.dataset.place]) && again) $("checkBtn").click();
+  };
+  /* Make sense of whatever is in the box. Returns true once there is a ZIP code to use. */
+  let pendingV = null, pendingP = null;
+  function readZip() {                       // one lookup at a time for the same text
+    const v = $("zip").value.trim();
+    if (pendingP && pendingV === v) return pendingP;
+    pendingV = v; pendingP = readZipNow(v).finally(() => { pendingP = null; });
+    return pendingP;
+  }
+  async function readZipNow(v) {
+    if (/^\d{5}$/.test(v)) { setZip(v, ""); return true; }
+    if (!v) { say("Enter a ZIP code or a town."); return false; }
+    if (v === state.place && zipOk()) return true;
+    if (/^\d+$/.test(v)) { say("A ZIP code has 5 digits."); return false; }
+    hidePlaces(); say(`Looking up ${v}\u2026`);
+    let list;
+    try { list = await findPlaces(v); }
+    catch (e) { say(`Couldn't look up that town (${e.message}). Type a 5-digit ZIP code instead.`); return false; }
+    if ($("zip").value.trim() !== v) return false;            // they kept typing
+    if (!list.length) { say(`Couldn't find a US town called \u201c${v}\u201d. Check the spelling, add the state (Apex, NC), or type a ZIP code.`); return false; }
+    if (list.length === 1) return usePlace(list[0]);
+    showPlaces(list, v); say("");
+    return false;
+  }
+  $("zip").onchange = () => { readZip(); };
   $("zip").oninput = () => { if (/^\d{5}$/.test($("zip").value.trim())) readZip(); };
-  $("zip").onkeydown = e => { if (e.key === "Enter") $("checkBtn").click(); };
+  $("zip").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("checkBtn").click(); } };
   $("relay").onchange = () => { state.relay = useRelay = $("relay").checked; save(); };
 
   /* ---- check */
   $("checkBtn").onclick = async () => {
-    if (!readZip()) { say("Enter the 5-digit ZIP code of the stores you shop at."); $("zip").focus(); return; }
+    if (!(await readZip())) { checkAfterPick = !$("places").hidden; return; }
+    checkAfterPick = false;
     if (!state.items.length) { say("Add at least one item to your list first."); $("newItem").focus(); return; }
     if (!selectedStores().length) { say("Tick at least one store."); return; }
     $("checkBtn").disabled = true; say("Reading this week's ads…");
@@ -610,7 +713,7 @@ if (typeof document !== "undefined") {
   function draw() {
     const last = state.last;
     if (!last) {
-      $("output").innerHTML = `<div class="start"><b>Nothing checked yet.</b><br>Add items to your list, enter your store ZIP code at the top, and click “Check this week's ads”.</div>`;
+      $("output").innerHTML = `<div class="start"><b>Nothing checked yet.</b><br>Add items to your list, enter your ZIP code or town at the top, and click “Check this week's ads”.</div>`;
       return;
     }
     const sel = selectedStores(), rows = current(), plan = planOf(rows);
@@ -679,7 +782,7 @@ if (typeof document !== "undefined") {
     h += `<p class="soft noprint">` + sel.map(s => {
       const st = last.status[s];
       return `${esc(s)}: ${st && st.items ? st.items + (st.items === 1 ? " deal" : " deals") + (st.valid_to ? ", through " + day(st.valid_to) : "") : "none"}`;
-    }).join(". ") + `.<br>Weekly ads list sale items only, and sizes differ between stores, so check the product named on each deal. Some prices need the store's loyalty card.</p>`;
+    }).join(". ") + `.<br>Weekly ads list sale items only, and sizes differ between stores, so check the product named on each deal. Some prices need the store's loyalty card. Town lookup uses GeoNames data via Open-Meteo.</p>`;
     if (sample) h += `<details class="noprint"><summary>Technical details for troubleshooting</summary><pre>${esc(JSON.stringify(sample, null, 1).slice(0, 2500))}</pre></details>`;
     $("output").innerHTML = h;
     if (allDeals && $("browseFilter")) { $("browseFilter").oninput = $("browseMine").onchange = drawBrowse; drawBrowse(); }
@@ -775,11 +878,11 @@ if (typeof document !== "undefined") {
   $("zoom").onclick = e => { if (e.target === $("zoom")) $("zoom").close(); };
 
   /* ---- start */
-  $("zip").value = state.zip; $("relay").checked = useRelay = !!state.relay;
+  $("zip").value = state.place || state.zip; $("relay").checked = useRelay = !!state.relay;
   drawList(); drawStores(); draw();
   if (/^\d{5}$/.test(state.zip) && !state.nearby.length && !state.other.length) autoFind();
   if (state.last && !state.last.failed)
     say("Showing saved results from " + new Date(state.last.when).toLocaleString() + ". Most ads change on Wednesdays; check again for current prices.");
 }
-if (typeof module !== "undefined") module.exports = { findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
+if (typeof module !== "undefined") module.exports = { findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
 </script></body></html>
