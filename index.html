@@ -261,6 +261,9 @@
   .qstore { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
   .qstore small { color:var(--soft); font-size:.8rem; }
   .qbar { margin-top:14px; }
+  .nonebox { margin-top:18px; padding:14px; border:2px dashed var(--line); border-radius:10px; }
+  .nonebox .specq { flex:1 1 240px; font-size:1rem; padding:10px 12px; }
+  .dym a.schip { text-decoration:none; }
   .qbar button:not(.link) { font-size:1rem; padding:10px 16px; }
   @media (max-width:560px) { .qgrid { grid-template-columns:1fr 1fr; gap:10px; } .choose h2 { font-size:1.55rem; } }
 
@@ -777,6 +780,7 @@ function view(results, items, selected) {
   return items.map(it => {
     const r = (results || []).find(x => x.item === it.q);
     if (!r) return { item: it.q, pending: true, stores: {}, best: null, hidden: 0 };
+    if (it.none) return { item: it.q, stores: {}, best: null, hidden: 0, pool: [], picked: false, distinct: 0, needsChoice: false, none: true };
     const hide = new Set(it.hide || []);
     const stores = {}, pool = []; let hidden = 0;
     selected.forEach(s => {
@@ -1292,6 +1296,8 @@ if (typeof document !== "undefined") {
           if (n) { out.status[st] = Object.assign({}, ps, { old: true }); filled.push({ store: st, when: prev.when }); }
         });
       }
+      if (!prev || new Date(prev.when).getTime() < (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate() - ((n.getDay() - 3 + 7) % 7)).getTime(); })())
+        state.items.forEach(i => { delete i.none; });
       state.got = {}; answered.length = 0; skipped.clear();
       const sel0 = new Set(selectedStores()), nm = new Set(), names = [];
       out.deals.forEach(d => { const k = d.store + "|" + d.name; if (sel0.has(d.store) && !nm.has(k)) { nm.add(k); names.push([d.store, d.name]); } });
@@ -1400,7 +1406,7 @@ if (typeof document !== "undefined") {
   const b64d = str => decodeURIComponent(escape(atob(str.replace(/-/g, "+").replace(/_/g, "/"))));
   $("shareBtn").onclick = async () => {
     if (!state.items.length) { $("shareOut").hidden = false; $("shareOut").value = "Add items to your list first."; return; }
-    const pack = { v: 1, i: state.items.map(i => [i.q, i.only || [], i.hide || [], i.any ? 1 : 0]), z: state.zip, p: state.place, s: state.stores };
+    const pack = { v: 1, i: state.items.map(i => [i.q, i.only || [], i.hide || [], i.any ? 1 : i.none ? 2 : 0]), z: state.zip, p: state.place, s: state.stores };
     const url = location.href.split("#")[0] + "#list=" + b64e(JSON.stringify(pack));
     $("shareOut").value = url;
     let ok = false;
@@ -1417,7 +1423,7 @@ if (typeof document !== "undefined") {
     history.replaceState(null, "", location.href.split("#")[0]);
     if (!pack || !Array.isArray(pack.i)) { say("That list link is damaged, so it couldn't be opened."); return; }
     const items = pack.i.filter(x => Array.isArray(x) && typeof x[0] === "string" && x[0].trim()).slice(0, 200)
-      .map(x => ({ q: x[0].trim().slice(0, 80), only: (x[1] || []).map(String).slice(0, 50), hide: (x[2] || []).map(String).slice(0, 50), any: x[3] === 1, done: x[3] === 1 || ((x[1] || []).length ? true : undefined) }));
+      .map(x => ({ q: x[0].trim().slice(0, 80), only: (x[1] || []).map(String).slice(0, 50), hide: (x[2] || []).map(String).slice(0, 50), any: x[3] === 1, none: x[3] === 2 || undefined, done: x[3] === 2 || x[3] === 1 || ((x[1] || []).length ? true : undefined) }));
     if (!items.length) return;
     const bar = $("shareBar");
     bar.innerHTML = `<p style="margin:0 0 8px"><b>Someone shared a list with ${items.length} item${items.length > 1 ? "s" : ""}:</b> ${items.slice(0, 6).map(i => esc(i.q)).join(", ")}${items.length > 6 ? "\u2026" : ""}</p>
@@ -1517,6 +1523,15 @@ if (typeof document !== "undefined") {
         <span class="qstore">${chip(d.store)}${st.length > 1 ? `<small>also ${esc(st.filter(x => x !== d.store).join(", "))}</small>` : ""}</span>
       </button>`;
     }).join("") + `</div>
+      <div class="nonebox">
+        <p style="margin:0 0 8px"><b>Don't see the one you want?</b> Only products on sale this week show up here.
+        Type the brand or kind you're after and we'll look for it, or keep it on your list without a sale.</p>
+        <div class="row">
+          <input type="text" class="specq" data-specfor="${idx}" value="" placeholder="e.g. Idahoan Buttery ${esc(what)}" aria-label="The ${esc(what)} you want" autocomplete="off">
+          <button class="solid" data-spec="${idx}">${ic("search")}Look for it</button>
+        </div>
+        <button class="link" data-none="${idx}" style="margin-top:8px">Keep \u201c${esc(r.item)}\u201d on my list without a sale</button>
+      </div>
       <div class="row qbar">
         <button data-any="${idx}">${ic("tag")}Any of these is fine</button>
         <button data-skip="${esc(r.item)}">Skip for now</button>
@@ -1603,7 +1618,12 @@ if (typeof document !== "undefined") {
     if (missing.length) {
       h += `<p style="margin:12px 0 0"><b>Not on sale at your stores this week:</b> ${missing.map(esc).join(", ")}. Buy these wherever is handy.</p>`;
       missing.forEach(item => {
-        const sug = suggestFor(item, last.names), idx = state.items.findIndex(i => i.q === item);
+        const idx0 = state.items.findIndex(i => i.q === item);
+        h += `<div class="dym noprint"><span>${ic("external")}Regular price of <b>${esc(item)}</b> at:</span>` +
+          sel.map(st => `<a class="schip" style="${scss(st)}" href="${esc(storeLink(st, parseQuery(item).search || item))}" target="_blank" rel="noopener noreferrer">${esc(st)}</a>`).join("") +
+          (idx0 >= 0 && state.items[idx0].none ? ` <button class="link" data-askagain="${idx0}">${ic("swap")}Show me the sale choices again</button>` : "") + `</div>`;
+        if (idx0 >= 0 && state.items[idx0].none) return;
+        const sug = suggestFor(item, last.names), idx = idx0;
         if (sug.length && idx >= 0) h += `<div class="dym noprint"><span>${ic("search")}Instead of <b>${esc(item)}</b>, did you mean</span>` +
           sug.map(x => `<button data-replace="${idx}" data-with="${esc(x.q)}">${esc(x.q)} (${x.n} deal${x.n > 1 ? "s" : ""})</button>`).join("") + `</div>`;
       });
@@ -1726,6 +1746,18 @@ if (typeof document !== "undefined") {
     if (itemOpen.delete(oldQ)) itemOpen.add(newQ);
     it.q = newQ; save(); drawList(); draw();
   }
+  /* The shopper typed the exact product they want: search the ads for that instead */
+  function lookFor(idx, text) {
+    const it = state.items[idx], v = String(text || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!it) return;
+    if (!v) { const box = $("output").querySelector(`.specq[data-specfor="${idx}"]`); if (box) { box.focus(); box.placeholder = "Type a brand or kind first"; } return; }
+    if (state.items.some((i, j) => j !== idx && i.q.toLowerCase() === v.toLowerCase())) { say(`\u201c${v}\u201d is already on your list.`); return; }
+    it.q = v; it.only = []; it.hide = []; it.any = false; it.done = undefined; delete it.none;
+    save(); drawList(); draw(); say(`Looking for \u201c${v}\u201d in this week's ads\u2026`); scheduleAuto(100);
+  }
+  $("output").addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.classList && e.target.classList.contains("specq")) { e.preventDefault(); lookFor(+e.target.dataset.specfor, e.target.value); }
+  });
   $("output").onchange = e => {
     const t = e.target; if (t.dataset.only === undefined) return;
     const it = state.items[+t.dataset.only]; if (!it) return;
@@ -1832,6 +1864,11 @@ if (typeof document !== "undefined") {
       it.only = [t.dataset.name.toLowerCase()]; it.done = true; it.any = false; answered.push(it.q); save(); draw();
       $("output").scrollIntoView({ behavior: "smooth", block: "start" }); return;
     }
+    if (t.dataset.spec !== undefined) { lookFor(+t.dataset.spec, t.closest(".nonebox").querySelector(".specq").value); return; }
+    if (t.dataset.none !== undefined) {
+      const it = state.items[+t.dataset.none]; if (!it) return;
+      it.none = true; it.only = []; it.any = false; it.done = true; answered.push(it.q); save(); draw(); return;
+    }
     if (t.dataset.skip !== undefined) { skipped.add(t.dataset.skip); draw(); return; }
     if (t.dataset.unskip !== undefined) { skipped.clear(); draw(); return; }
     if (t.dataset.back !== undefined) {
@@ -1841,7 +1878,7 @@ if (typeof document !== "undefined") {
     }
     if (t.dataset.confirm !== undefined) { const it = state.items[+t.dataset.confirm]; if (it) { it.done = true; it.any = false; save(); draw(); } return; }
     if (t.dataset.any !== undefined) { const it = state.items[+t.dataset.any]; if (it) { it.any = true; it.only = []; it.done = true; answered.push(it.q); save(); draw(); } return; }
-    if (t.dataset.askagain !== undefined) { const it = state.items[+t.dataset.askagain]; if (it) { if (!current().some(x => x.needsChoice)) answered.length = 0; else { const k = answered.indexOf(it.q); if (k >= 0) answered.splice(k, 1); } it.any = false; it.only = []; it.done = undefined; itemOpen.delete(it.q); save(); draw();
+    if (t.dataset.askagain !== undefined) { const it = state.items[+t.dataset.askagain]; if (it) { if (!current().some(x => x.needsChoice)) answered.length = 0; else { const k = answered.indexOf(it.q); if (k >= 0) answered.splice(k, 1); } it.any = false; it.only = []; it.done = undefined; delete it.none; itemOpen.delete(it.q); save(); draw();
       $("output").scrollIntoView({ behavior: "smooth", block: "start" }); } return; }
     if (t.dataset.zoom) {
       $("zoom").querySelector("img").src = t.dataset.zoom; $("zoomCap").textContent = t.dataset.cap || "";
