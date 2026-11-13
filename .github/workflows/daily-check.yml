@@ -1,0 +1,21 @@
+name: Daily ad check
+
+on:
+  schedule:
+    - cron: "17 11 * * *"   # every morning, about 6:17 am Eastern
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [index.html, tests/smoke.js]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Read this week's ads with Pantry's own code
+        run: node tests/smoke.js

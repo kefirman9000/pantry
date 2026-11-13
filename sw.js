@@ -2,7 +2,7 @@
    The app itself (page, icons, fonts) is kept on the phone so it opens with no signal.
    The page is always fetched fresh when online, so updates arrive on the next open.
    Store-ad lookups are never cached here: the app keeps your last results itself. */
-const CACHE = "pantry-v4";
+const CACHE = "pantry-v5";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png",
                "./icon-maskable-512.png", "./apple-touch-icon.png", "./favicon.png"];
 

@@ -424,6 +424,11 @@
         <div class="checks" id="otherBoxes" style="margin-top:8px"></div>
       </details>
     </details>
+    <details id="cardsBox" style="margin-top:10px">
+      <summary>Store cards and coupons</summary>
+      <p class="soft" style="margin:8px 0 6px">Some sale prices need the store's card, app or a clipped coupon. Untick a store if you don't use its card, and those prices won't count there.</p>
+      <div class="checks" id="cardBoxes"></div>
+    </details>
     <div class="row" style="margin-top:12px">
       <input type="text" id="newStore" placeholder="Add a store by name" autocomplete="off" aria-label="Store name">
       <button class="small" id="addStoreBtn"><span data-ic="plus"></span>Add store</button>
@@ -530,7 +535,8 @@ async function withRetry(url, i) {
   try { return await tryRoute(url, i); }
   catch (e) { if (!(e.timeout || e.retry)) throw e; await pause(700); return tryRoute(url, i); }
 }
-async function getJson(url, direct) {
+const getJson = (url, direct) => gate(() => getJsonNow(url, direct));
+async function getJsonNow(url, direct) {
   if (direct) return withRetry(url, -1);
   let order = useRelay ? RELAYS.map((_, i) => i) : [-1, ...RELAYS.map((_, i) => i)];
   if (route !== null && order.includes(route)) order = [route, ...order.filter(i => i !== route)];
@@ -545,6 +551,57 @@ async function getJson(url, direct) {
   }
   throw last;
 }
+/* ---- dates: compare real times, never text. A bare date runs to the end of that day. */
+const toTime = (v, endOfDay) => { if (!v) return NaN; const t = String(v); return Date.parse(t.length <= 10 ? t + (endOfDay ? "T23:59:59" : "T00:00:00") : t); };
+const isLive = (from, to, now = Date.now()) => !(toTime(from) > now) && !(toTime(to, true) < now);
+
+/* ---- at most 4 lookups at once, so relays and the ad service don't turn us away */
+const MAX_AT_ONCE = 4;
+let active = 0;
+const waiting = [];
+async function gate(fn) {
+  if (active >= MAX_AT_ONCE) await new Promise(ok => waiting.push(ok));
+  active++;
+  try { return await fn(); }
+  finally { active--; const next = waiting.shift(); if (next) next(); }
+}
+
+/* ---- ads saved on the device until they expire, so a recheck doesn't download them again */
+const AD_CACHE = "ads-data-v1", memo = new Map();
+const cacheUrl = key => "https://pantry.cache/" + encodeURIComponent(key);
+async function cacheGet(key) {
+  const m = memo.get(key);
+  if (m) { if (m.exp > Date.now()) return m.data; memo.delete(key); }
+  if (typeof caches === "undefined") return undefined;
+  try {
+    const c = await caches.open(AD_CACHE), r = await c.match(cacheUrl(key));
+    if (!r) return undefined;
+    const e = await r.json();
+    if (e.exp > Date.now()) { memo.set(key, e); return e.data; }
+    c.delete(cacheUrl(key));
+  } catch (e) {}
+  return undefined;
+}
+async function cachePut(key, data, exp) {
+  memo.set(key, { exp, data });
+  if (typeof caches === "undefined") return;
+  try { const c = await caches.open(AD_CACHE); await c.put(cacheUrl(key), new Response(JSON.stringify({ exp, data }), { headers: { "Content-Type": "application/json" } })); } catch (e) {}
+}
+async function cached(key, exp, fn, fresh) {
+  if (!fresh) { const hit = await cacheGet(key); if (hit !== undefined) return hit; }
+  const data = await fn();
+  if (exp > Date.now() && data && (!Array.isArray(data) || data.length)) cachePut(key, data, exp);
+  return data;
+}
+async function pruneAdCache() {
+  if (typeof caches === "undefined") return;
+  try {
+    const c = await caches.open(AD_CACHE);
+    for (const req of await c.keys()) { const r = await c.match(req); const e = r && await r.json().catch(() => null); if (!e || !(e.exp > Date.now())) await c.delete(req); }
+  } catch (e) {}
+}
+const HOURS = h => Date.now() + h * 3600e3;
+
 const squash = t => String(t ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 /* One tidy name per store. The four built-in stores also match longer variants of their name. */
 function storeName(merchant) {
@@ -553,24 +610,28 @@ function storeName(merchant) {
   for (const d of DEFAULT_STORES) if (s === DEFAULTS[d] || s.startsWith(DEFAULTS[d])) return d;
   return String(merchant).replace(/\s+/g, " ").trim();
 }
-async function fetchFlyers(zip) {
-  const data = await getJson(`${API}/flyers?locale=en-us&postal_code=${encodeURIComponent(zip)}`);
+async function fetchFlyers(zip, fresh) {
+  const data = await cached("flyers|" + zip, HOURS(3), () => getJson(`${API}/flyers?locale=en-us&postal_code=${encodeURIComponent(zip)}`), fresh);
   const list = Array.isArray(data) ? data : (data && data.flyers) || [];
   const out = [];
   for (const f of list) {
     if (!f || typeof f !== "object" || f.id == null) continue;
     const store = storeName(f.merchant || f.merchant_name);
-    if (store) out.push({ id: String(f.id), store, valid_from: f.valid_from, valid_to: f.valid_to });
+    // next week's ad often appears a day or two early; an ended one can linger. Keep only ads running now.
+    if (store && isLive(f.valid_from, f.valid_to)) out.push({ id: String(f.id), store, valid_from: f.valid_from, valid_to: f.valid_to });
   }
   return out;
 }
-async function fetchFlyerItems(id) {
-  const data = await getJson(`${API}/flyers/${id}?locale=en-us`);
+async function fetchFlyerItems(id, validTo) {
+  const end = toTime(validTo, true);
+  const exp = Math.min(isFinite(end) ? end : HOURS(24), HOURS(24 * 8));
+  const data = await cached("flyer|" + id, exp, () => getJson(`${API}/flyers/${id}?locale=en-us`));
   const items = Array.isArray(data) ? data : (data && data.items) || [];
   return items.filter(i => i && typeof i === "object");
 }
-async function fetchSearch(zip, q) {
-  const data = await getJson(`${API}/items/search?locale=en-us&postal_code=${encodeURIComponent(zip)}&q=${encodeURIComponent(q)}`);
+async function fetchSearch(zip, q, fresh) {
+  const data = await cached("search|" + zip + "|" + q.toLowerCase(), HOURS(3),
+    () => getJson(`${API}/items/search?locale=en-us&postal_code=${encodeURIComponent(zip)}&q=${encodeURIComponent(q)}`), fresh);
   return ((data && data.items) || []).filter(i => i && typeof i === "object");
 }
 const safe = p => p.then(v => [v, null], e => [[], e]);
@@ -687,7 +748,8 @@ function makeDeal(raw, store, validFrom, validTo) {
     if (unit !== price) label += ` ($${unit.toFixed(2)} each)`;
   } else label = story || "See ad for price";
 
-  return { store, name, unit_price: unit, price_label: label.trim(), sale_story: story,
+  const card = price !== null && /\bcard\b|\bvic\b|\bmvp\b|digital|coupon|\bclip\b|member|rewards|loyalty|\bapp\b/i.test([label, story, fine.join(" ")].join(" "));
+  return { store, name, unit_price: unit, price_label: label.trim(), sale_story: story, card,
            per: measureOf(raw, name, unit, label, post),
            was: was !== null && price !== null && was > price ? was : null,
            valid_from: String(raw.valid_from || validFrom || ""),
@@ -772,7 +834,8 @@ const byPrice = (a, b) => (a.unit_price === null) - (b.unit_price === null)
   || (a.unit_price - b.unit_price) || a.name.localeCompare(b.name);
 
 /* --------------------------------------------- reading the ads for a check */
-async function checkPrices(zip, queries, selected) {
+async function checkPrices(zip, queries, selected, opts) {
+  const fresh = !!(opts && opts.fresh);
   const sel = new Set(selected);
   relayUsed = false;
   const warnings = [], deals = [], seen = new Set(), nearby = new Set(), status = {};
@@ -783,6 +846,7 @@ async function checkPrices(zip, queries, selected) {
   const byId = new Map();
   const add = (d, fromSearch) => {
     if (!d) return;
+    if (!isLive(d.valid_from, d.valid_to)) return;                 // not started yet, or already over
     // The same ad entry can arrive twice: once in the store's full ad and once from the item search.
     // The search copy carries the price wording ("2/", "lb", card notes), so it wins.
     if (d._id && byId.has(d.store + d._id)) { if (fromSearch) Object.assign(byId.get(d.store + d._id), d); return; }
@@ -791,13 +855,14 @@ async function checkPrices(zip, queries, selected) {
     if (seen.has(key)) return;
     seen.add(key); deals.push(d); nearby.add(d.store);
     const s = st(d.store); s.items++;
-    if (d.valid_to > s.valid_to) s.valid_to = d.valid_to;
+    if (d.valid_to && (!s.valid_to || toTime(d.valid_to, true) > toTime(s.valid_to, true))) s.valid_to = d.valid_to;
   };
 
   // 1) The list of this week's ads near the ZIP, then each chosen store's full ad.
   attempted++;
-  const [flyers, err] = await safe(fetchFlyers(zip));
+  const [flyers, err] = await safe(fetchFlyers(zip, fresh));
   let fullAdsFailed = !!err;
+  const listFailed = !!err;
   if (err) note("list of ads", err);
   const perStore = {}, jobs = [];
   let sample = null;
@@ -808,12 +873,13 @@ async function checkPrices(zip, queries, selected) {
   });
   async function readFlyers(list) {
     attempted += list.length;
-    const fetched = await Promise.all(list.map(f => safe(fetchFlyerItems(f.id))));
+    const fetched = await Promise.all(list.map(f => safe(fetchFlyerItems(f.id, f.valid_to))));
     list.forEach((f, i) => {
       const [rows, e] = fetched[i];
-      if (e) { note("full ad", e); fullAdsFailed = true; return; }
+      if (e) { note("full ad", e); fullAdsFailed = true; st(f.store).failed = (st(f.store).failed || 0) + 1; return; }
+      st(f.store).loaded = (st(f.store).loaded || 0) + 1;
       if (!sample && rows.length) sample = rows.find(x => x.price || x.current_price) || rows[0];
-      rows.forEach(raw => add(makeDeal(raw, f.store, f.valid_from, f.valid_to)));
+      rows.forEach(raw => { const d = makeDeal(raw, f.store, f.valid_from, f.valid_to); if (d) d.flyer = f.id; add(d); });
     });
   }
   await readFlyers(jobs);
@@ -821,16 +887,18 @@ async function checkPrices(zip, queries, selected) {
   // 2) Ask the ad search for each item (this returns deals from every store nearby).
   const parsed = queries.map(parseQuery);
   attempted += queries.length;
-  const searched = await Promise.all(parsed.map(p => safe(fetchSearch(zip, p.search))));
+  const searched = await Promise.all(parsed.map(p => safe(fetchSearch(zip, p.search, fresh))));
   const seenFlyers = new Set(jobs.map(f => f.id)), more = [];
   searched.forEach(([rows, e]) => {
     if (e) { note("item search", e); return; }
     rows.forEach(raw => {
       const store = storeName(raw.merchant_name || raw.merchant);
       if (!store) return;
-      add(makeDeal(raw, store), true);
       const fid = raw.flyer_id == null ? "" : String(raw.flyer_id);
-      if (fid && sel.has(store) && !seenFlyers.has(fid) && more.length < 16) {
+      const d = makeDeal(raw, store);
+      if (d && fid) d.flyer = fid;
+      add(d, true);
+      if (fid && sel.has(store) && isLive(raw.valid_from, raw.valid_to) && !seenFlyers.has(fid) && more.length < 16) {
         seenFlyers.add(fid); more.push({ id: fid, store, valid_from: raw.valid_from, valid_to: raw.valid_to });
       }
     });
@@ -849,8 +917,8 @@ async function checkPrices(zip, queries, selected) {
       : blocked
         ? "Couldn't reach the ad service, directly or through the backup relays. Check your internet connection and try again in a few minutes." + why
         : "The ad service returned errors for every lookup. Try again in a few minutes." + why);
-  } else if (fullAdsFailed) {
-    warnings.push("Couldn't download every store's full ad, so some results come from the item search only and may miss a few deals." + why);
+  } else if (listFailed) {
+    warnings.push("Couldn't get the list of this week's ads, so results come from the item search only and may miss a few deals." + why);
   }
 
   // 4) Match the list against everything that was read, at every store.
@@ -860,16 +928,22 @@ async function checkPrices(zip, queries, selected) {
     return { item, stores };
   });
 
-  // 5) Full ads leave out the price wording. For matched deals that lack it, ask for the entry's details.
+  // 5) Full ads leave out the price wording ("2/", "lb", card notes). Ask for it, starting with each item's likely winners at each store.
   let detail = null;
-  const thin = [...new Set(results.flatMap(r => selected.flatMap(s => r.stores[s] || [])))].filter(d => !d._rich && d._id).slice(0, 40);
+  results.forEach(r => Object.values(r.stores).forEach(sortDeals));
+  const thin = [], seenThin = new Set();
+  for (let rank = 0; rank < 8 && thin.length < 80; rank++)
+    results.forEach(r => selected.forEach(s => {
+      const d = (r.stores[s] || [])[rank];
+      if (d && !d._rich && d._id && !seenThin.has(d) && thin.length < 80) { seenThin.add(d); thin.push(d); }
+    }));
   const enrich = async d => {
-    const [got, e] = await safe(getJson(`${API}/items/${encodeURIComponent(d._id)}?locale=en-us`).then(x => [x]));
+    const [got, e] = await safe(cached("item|" + d._id, HOURS(24), () => getJson(`${API}/items/${encodeURIComponent(d._id)}?locale=en-us`)).then(x => [x]));
     const obj = !e && got[0] && typeof got[0] === "object" ? (got[0].item && typeof got[0].item === "object" ? got[0].item : got[0]) : null;
     if (!obj || Array.isArray(obj)) return false;
     if (!detail) detail = obj;
     const better = makeDeal(Object.assign({}, d._raw, obj, { name: d.name }), d.store, d.valid_from, d.valid_to);
-    if (better && (better.unit_price !== null || d.unit_price === null)) Object.assign(d, better, { image: d.image || better.image });
+    if (better && (better.unit_price !== null || d.unit_price === null)) Object.assign(d, better, { image: d.image || better.image, flyer: d.flyer || better.flyer });
     return true;
   };
   if (thin.length && await enrich(thin[0]))
@@ -905,7 +979,8 @@ function kinds(q, offers) {
 }
 
 /* What to show: only the chosen stores, minus products you hid, with the cheapest picked. */
-function view(results, items, selected) {
+function view(results, items, selected, noCard) {
+  const noCardAt = new Set(noCard || []);
   return items.map(it => {
     const r = (results || []).find(x => x.item === it.q);
     if (!r) return { item: it.q, pending: true, stores: {}, best: null, hidden: 0 };
@@ -914,7 +989,7 @@ function view(results, items, selected) {
     const stores = {}, pool = []; let hidden = 0;
     selected.forEach(s => {
       const all = r.stores[s] || [];
-      const vis = all.filter(d => !hide.has(d.name.toLowerCase()));
+      const vis = all.filter(d => !hide.has(d.name.toLowerCase()) && !(d.card && noCardAt.has(s)));
       hidden += all.length - vis.length; pool.push(...vis);
       if (vis.length) stores[s] = vis;
     });
@@ -1007,7 +1082,7 @@ if (typeof document !== "undefined") {
   const dot = st => `<i class="sdot" style="${scss(st)}" aria-hidden="true"></i>`;
   const tag = d => d.unit_price === null
     ? `<span class="tag none">${esc(d.price_label)}</span>`
-    : `<span class="tag${d.price_label.length > 9 ? " long" : ""}">${esc(d.price_label)}${d.per && !d.per.fromLabel ? `<small class="per">${esc(d.per.text)}</small>` : ""}</span>`;
+    : `<span class="tag${d.price_label.length > 9 ? " long" : ""}">${esc(d.price_label)}${d.per && !d.per.fromLabel ? `<small class="per">${esc(d.per.text)}</small>` : ""}${d.card ? `<small class="per">with card or coupon</small>` : ""}</span>`;
   /* ---- sales ending within 3 days */
   const endOf = s => { if (!s) return NaN; return Date.parse(s.length <= 10 ? s + "T23:59:59" : s); };
   const endsSoon = d => {
@@ -1058,7 +1133,9 @@ if (typeof document !== "undefined") {
     const dom = DOMAINS[store];
     return "https://www.google.com/search?q=" + encodeURIComponent((dom ? "site:" + dom + " " : store + " ") + q);
   }
-  const verify = d => `<a class="verify" href="${esc(storeLink(d.store, d.name))}" target="_blank" rel="noopener noreferrer">${ic("external")}Check at ${esc(d.store)}</a>`;
+  const adLinkFirst = d => d.flyer ? adLink(d).replace(" &middot; ", "") + " &middot; " : "";
+  const adLink = d => d.flyer ? ` &middot; <a class="verify" href="https://flipp.com/en-us/flyer/${encodeURIComponent(d.flyer)}" target="_blank" rel="noopener noreferrer">${ic("tag")}See it in the ad</a>` : "";
+  const verify = d => adLinkFirst(d) + `<a class="verify" href="${esc(storeLink(d.store, d.name))}" target="_blank" rel="noopener noreferrer">${ic("external")}Check at ${esc(d.store)}</a>`;
 
   /* ---- prices worth a second look */
   function flagsOf(d, r) {
@@ -1271,6 +1348,9 @@ if (typeof document !== "undefined") {
       : findNote ? findNote
       : zipOk() ? "" : "Enter your ZIP code or town at the top to see stores near you.";
     $("nearbyNote").hidden = !$("nearbyNote").textContent;
+    const noCard = new Set(state.noCard || []);
+    $("cardBoxes").innerHTML = state.stores.map(s => `<label style="${scss(s)}"><input type="checkbox" data-card="${esc(s)}"${noCard.has(s) ? "" : " checked"}> ${dot(s)}I use the ${esc(s)} card</label>`).join("");
+    $("cardsBox").hidden = !state.stores.length;
   }
   function toggleStore(name, on) {
     state.stores = state.stores.filter(s => s !== name);
@@ -1279,6 +1359,12 @@ if (typeof document !== "undefined") {
     if (on && state.last) say(`${name} added. Updating prices\u2026`);
     scheduleAuto(on ? 600 : null);
   }
+  $("cardBoxes").onchange = e => {
+    const s = e.target.dataset.card; if (s === undefined) return;
+    state.noCard = (state.noCard || []).filter(x => x !== s);
+    if (!e.target.checked) state.noCard.push(s);
+    save(); draw();
+  };
   $("storeBoxes").onchange = $("nearbyBoxes").onchange = $("otherBoxes").onchange = e => {
     if (e.target.dataset.store) toggleStore(e.target.dataset.store, e.target.checked);
   };
@@ -1409,7 +1495,7 @@ if (typeof document !== "undefined") {
     running = true; $("checkBtn").disabled = true; drawCheckHint();
     say(auto ? "Updating prices from this week's ads\u2026" : "Reading this week's ads\u2026 this takes a few seconds.");
     try {
-      const out = await checkPrices(state.zip, state.items.map(i => i.q), selectedStores());
+      const out = await checkPrices(state.zip, state.items.map(i => i.q), selectedStores(), { fresh: !auto });
       const prev = state.last && !state.last.failed && state.last.zip === state.zip ? state.last : null;
       if (out.failedCompletely && prev) {
         // keep the last good results rather than showing nothing
@@ -1433,15 +1519,17 @@ if (typeof document !== "undefined") {
           out.results.forEach(r => {
             const pr = (prev.results || []).find(x => x.item === r.item);
             if (!pr || !pr.stores[st]) return;
-            const keep = pr.stores[st].filter(d => !d.valid_to || d.valid_to > now).map(d => Object.assign({}, d, { old: true }));
+            const keep = pr.stores[st].filter(d => !d.valid_to || toTime(d.valid_to, true) > Date.now()).map(d => Object.assign({}, d, { old: true }));
             if (keep.length) { r.stores[st] = keep; n += keep.length; }
           });
           if (n) { out.status[st] = Object.assign({}, ps, { old: true }); filled.push({ store: st, when: prev.when }); }
         });
       }
-      if (!prev || new Date(prev.when).getTime() < (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate() - ((n.getDay() - 3 + 7) % 7)).getTime(); })())
-        state.items.forEach(i => { delete i.none; });
-      state.got = {}; answered.length = 0; skipped.clear();
+      // a new week of ads: start the trip fresh. Otherwise keep what's already ticked off in the cart.
+      const prevEnd = prev && prev.status ? Math.max(...Object.values(prev.status).map(x => toTime(x && x.valid_to, true)).filter(isFinite), 0) : 0;
+      const newWeek = !prev || (prevEnd ? prevEnd < Date.now() : Date.now() - prev.when > 7 * 864e5);
+      if (newWeek) { state.items.forEach(i => { delete i.none; }); state.got = {}; }
+      answered.length = 0; skipped.clear();
       const sel0 = new Set(selectedStores()), nm = new Set(), names = [];
       out.deals.forEach(d => { const k = d.store + "|" + d.name; if (sel0.has(d.store) && !nm.has(k)) { nm.add(k); names.push([d.store, d.name]); } });
       const listWords = new Set(state.items.map(i => parseQuery(i.q).search.toLowerCase()));
@@ -1459,7 +1547,7 @@ if (typeof document !== "undefined") {
   }
 
   /* ---- results */
-  function current() { return view(state.last && state.last.results, state.items, selectedStores()); }
+  function current() { return view(state.last && state.last.results, state.items, selectedStores(), state.noCard); }
   /* Each ticked store's lowest price for an item, cheapest first, and how far each is above the best. */
   function compareOf(r, sel) {
     const rows = sel.map(s => {
@@ -1737,7 +1825,11 @@ if (typeof document !== "undefined") {
     if (!last.fallback) h += last.warnings.map(w => warnBox(esc(w))).join("");
     const filled = last.filled || [];
     filled.forEach(f => { h += warnBox(`Couldn't read ${esc(f.store)}'s ad just now, so its prices are from your check on ${esc(longDate(f.when))}. Those deals are marked \u201cFrom your last check\u201d.`); });
-    sel.forEach(st => { if (!(last.status[st] && last.status[st].items) && !filled.some(f => f.store === st))
+    const retryBtn = `<button class="small" data-do="retry">${ic("refresh")}Try again</button>`;
+    sel.forEach(st => { const x = last.status[st];
+      if (x && x.failed && !filled.some(f => f.store === st))
+        h += warnBox(`Couldn't load ${esc(st)}'s full ad${x.items ? `, so its results come from the item search only and may miss some deals` : ""}. ${retryBtn}`); });
+    sel.forEach(st => { if (!(last.status[st] && last.status[st].items) && !(last.status[st] && last.status[st].failed) && !filled.some(f => f.store === st))
       h += warnBox(`No ${esc(st)} deals found near ${esc(last.zip)}. If you just added this store, press \u201cCheck prices\u201d again. Otherwise it may not advertise near this ZIP code.`); });
 
     const missing = rows.filter(r => !r.pending && !Object.keys(r.stores).length).map(r => r.item);
@@ -1999,7 +2091,7 @@ if (typeof document !== "undefined") {
   $("output").onclick = e => {
     const t = e.target.closest("button"); if (!t) return;
     if (t.dataset.do === "shop") { openShop(); return; }
-    if (t.dataset.do === "check") { runCheck(false); return; }
+    if (t.dataset.do === "check" || t.dataset.do === "retry") { runCheck(false); return; }
     if (t.dataset.replace !== undefined) {
       const it = state.items[+t.dataset.replace], v = t.dataset.with;
       if (it && v && !state.items.some(i => i.q.toLowerCase() === v.toLowerCase())) { it.q = v; it.only = []; it.hide = []; it.any = false; it.done = undefined; save(); drawList(); draw(); scheduleAuto(200); }
@@ -2096,6 +2188,7 @@ if (typeof document !== "undefined") {
   drawInstall();
   window.addEventListener("online", () => { say("Back online."); scheduleAuto(500); });
   window.addEventListener("offline", () => say(state.last && !state.last.failed ? "You're offline. Your list and last results still work." : "You're offline."));
+  pruneAdCache();
   if (online && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
   applyView(); applySimple(); drawList(); drawStores(); draw(); readShared(); drawCheckHint();
@@ -2104,5 +2197,5 @@ if (typeof document !== "undefined") {
   else if (state.last && !state.last.failed && !$("status").textContent)
     say(adsAreOld() ? "New ads are out since your last check. Press \u201cCheck prices\u201d." : "Prices are from this week's ads, checked " + new Date(state.last.when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) + ".");
 }
-if (typeof module !== "undefined") module.exports = { kinds, findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
+if (typeof module !== "undefined") module.exports = { isLive, toTime, sortDeals, kinds, findPlaces, parsePlace, findStores, checkPrices, view, parseQuery, matches, storeName, makeDeal };
 </script></body></html>
