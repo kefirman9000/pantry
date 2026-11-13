@@ -134,7 +134,7 @@
   .narrowit { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 14px; }
   .narrowit p { margin:0 0 8px; }
   .narrowit h4 { margin:0 0 2px; font-size:1.05rem; }
-  .pickgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:10px; }
+  .pickgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr)); gap:10px; margin-top:10px; }
   .pcard { position:relative; display:flex; flex-direction:column; gap:5px; border:1px solid var(--line); border-radius:8px;
            padding:8px; cursor:pointer; background:var(--card); }
   .pcard:has(input:checked) { border:2px solid var(--leaf); padding:7px; background:var(--paper); }
@@ -229,7 +229,7 @@
   .summary b { color:var(--leaf); }
   .dym { margin:8px 0 0; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .dym button { border-radius:999px; padding:4px 12px; font-size:.92rem; border-color:var(--leaf); color:var(--leaf); }
-  .deals { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-top:12px; }
+  .deals { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(160px,100%),1fr)); gap:12px; margin-top:12px; }
   .deal { display:flex; flex-direction:column; gap:6px; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px; }
   .deal .pic { aspect-ratio:4/3; width:100%; }
   .deal .why { align-self:flex-start; background:var(--hot); color:#fff; font-weight:700; font-size:.8rem; border-radius:3px; padding:1px 7px; }
@@ -264,13 +264,14 @@
   .qdots { display:flex; gap:5px; } .qdots i { width:9px; height:9px; border-radius:50%; background:var(--line); }
   .qdots i.done { background:var(--leaf); } .qdots i.now { background:var(--tag); box-shadow:0 0 0 2px var(--ink); }
   .choose h2 { font-size:1.9rem; line-height:1.1; margin:0 0 4px; }
-  .qgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(175px,1fr)); gap:14px; margin:16px 0 4px; }
+  .qgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(175px,100%),1fr)); gap:14px; margin:16px 0 4px; }
   .qcard { display:flex; flex-direction:column; gap:8px; text-align:left; padding:10px 10px 12px; border-radius:10px;
            border:1px solid var(--line); border-top:5px solid var(--sc); background:var(--card); color:var(--ink); cursor:pointer; }
   .qcard:hover { border-color:var(--sc); box-shadow:0 0 0 2px var(--sc); }
   .qcard:focus-visible { outline:3px solid var(--sc); outline-offset:2px; }
   .qpic { display:grid; place-items:center; aspect-ratio:4/3; background:#fff; border-radius:6px; overflow:hidden; }
-  .qpic img { width:100%; height:100%; object-fit:contain; }
+  .qpic, .pic { position:relative; overflow:hidden; min-height:0; }
+  .qpic img, .pic img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .qname { font-weight:700; font-size:1rem; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .qprice .tag { font-size:1.35rem; }
   .qprice .tag.long { font-size:1rem; }
@@ -281,7 +282,31 @@
   .nonebox .specq { flex:1 1 240px; font-size:1rem; padding:10px 12px; }
   .dym a.schip { text-decoration:none; }
   .qbar button:not(.link) { font-size:1rem; padding:10px 16px; }
-  @media (max-width:560px) { .qgrid { grid-template-columns:1fr 1fr; gap:10px; } .choose h2 { font-size:1.55rem; } }
+  /* every tile in a grid is the same size: equal columns that long names or prices can't widen, equal rows */
+  .qgrid, .pickgrid, .deals { grid-auto-rows:1fr; align-items:stretch; }
+  .qcard, .pcard, .deal { min-width:0; height:100%; overflow:hidden; }
+  .qcard .tag, .pcard .tag, .deal .tag { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+  .qname { min-height:3.75em; }
+  .qprice { min-height:2.2em; display:flex; align-items:flex-start; }
+  .qstore { margin-top:auto; }
+  .qstore small { overflow-wrap:anywhere; }
+  .pcard .nm, .deal .nm { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; min-height:3.75em; }
+  .pcard .where { margin-top:auto; overflow-wrap:anywhere; }
+  @media (max-width:560px) {
+    .qgrid, .pickgrid, .deals { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .choose { padding:14px; }
+    .choose h2 { font-size:1.55rem; }
+    .qcard { padding:8px 8px 10px; gap:6px; }
+    .qname { font-size:.95rem; }
+    .qprice .tag, .qprice .tag.long { font-size:1.05rem; line-height:1.15; }
+    .qbar { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .qbar button { width:100%; justify-content:center; }
+    .qbar button.link { grid-column:1 / -1; }
+    .nonebox { padding:12px; }
+    .nonebox .row > * { flex:1 1 100%; }
+    .layout { padding:14px 12px 50px; }
+    .panel, .trip { padding:14px; }
+  }
 
   /* header view controls */
   .view { display:flex; gap:6px; margin-top:8px; }
