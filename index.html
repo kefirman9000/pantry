@@ -86,6 +86,10 @@
   .tag { display:inline-block; background:var(--tag); color:var(--tag-ink); font-stretch:68%; font-weight:800;
          font-size:1.55rem; line-height:1; padding:6px 9px 5px; border-radius:3px; white-space:nowrap; }
   .tag.long { font-size:1.05rem; white-space:normal; line-height:1.15; }
+  .tag .per, .cmp .per { display:block; font-size:.62em; font-weight:700; opacity:.78; margin-top:2px; white-space:nowrap; }
+  .cmp .per { font-size:.78em; }
+  .ends { display:inline-flex; align-items:center; gap:3px; color:var(--hot); font-weight:700; font-size:.85rem; }
+  .ends .ic { width:14px; height:14px; }
   .tag.none { background:none; border:1px dashed var(--line); color:var(--soft); font-weight:600; font-size:.95rem; }
 
   /* pictures from the ad */
@@ -427,9 +431,9 @@
       <summary>Trouble loading ads?</summary>
       <label class="relay soft">
         <input type="checkbox" id="relay">
-        <span>Use a relay. Some browsers block a page on your computer from reading the ad service directly.
-        Ticking this sends each lookup (your ZIP code and item names) through a free third-party relay,
-        allorigins.win, which can be slow or occasionally down.</span>
+        <span>Always use a relay. When your browser can't read the ad service directly, Pantry already switches by itself
+        to a free third-party relay (allorigins.win, then corsproxy.io as a backup), which sees your ZIP code and item names.
+        Tick this to skip the direct try and use a relay every time.</span>
       </label>
     </details>
   </div>
@@ -467,20 +471,54 @@ const DEFAULTS = { "Harris Teeter": "harristeeter", "Lowes Foods": "lowesfoods",
                    "Food Lion": "foodlion", "Target": "target" };
 const DEFAULT_STORES = Object.keys(DEFAULTS);
 const API = "https://backflipp.wishabi.com/flipp";   // Flipp: hosts stores' digital weekly ads
-const RELAY = "https://api.allorigins.win/raw?url=";
+/* Relays, used when the browser can't read the ad service directly. Tried in order; the one that works is remembered. */
+const RELAYS = [u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+                u => "https://corsproxy.io/?url=" + encodeURIComponent(u)];
+const TIMEOUT_MS = 10000;
 const MAX_FLYERS_PER_STORE = 6;
 const IGNORED_WORDS = new Set(["a", "an", "the", "of", "and", "or", "for", "with"]);
-let useRelay = false;
+let useRelay = false;      // ticked by hand: always go through a relay
+let route = null;          // what worked last: -1 = direct, 0.. = that relay
+let relayUsed = false;     // a relay carried at least one lookup in this check
 
 /* ------------------------------------------------------- fetching the ads */
-async function getJson(url, direct) {
-  let r;
-  try { r = await fetch(useRelay && !direct ? RELAY + encodeURIComponent(url) : url); }
-  catch (e) { const err = new Error("blocked or no connection"); err.blocked = true; throw err; }
-  if (!r.ok) throw new Error("error " + r.status);
-  const text = await r.text();
+const pause = ms => new Promise(ok => setTimeout(ok, ms));
+async function tryRoute(url, i) {
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = setTimeout(() => ctl && ctl.abort(), TIMEOUT_MS);
+  let r, text;
+  try {
+    try { r = await fetch(i < 0 ? url : RELAYS[i](url), ctl ? { signal: ctl.signal } : undefined); }
+    catch (e) {
+      const slow = e && e.name === "AbortError";
+      const err = new Error(slow ? "no reply after " + TIMEOUT_MS / 1000 + " seconds" : "blocked or no connection");
+      err.blocked = !slow; err.timeout = slow; throw err;
+    }
+    if (!r.ok) { const err = new Error("error " + r.status); err.retry = r.status === 429 || r.status >= 500; throw err; }
+    text = await r.text();
+  } finally { clearTimeout(timer); }
   try { return JSON.parse(text); }
-  catch (e) { throw new Error("unreadable reply (“" + text.slice(0, 50).replace(/\s+/g, " ") + "”)"); }
+  catch (e) { const err = new Error("unreadable reply (\u201c" + text.slice(0, 50).replace(/\s+/g, " ") + "\u201d)"); err.unreadable = true; throw err; }
+}
+/* One retry after a slow reply or a busy server. */
+async function withRetry(url, i) {
+  try { return await tryRoute(url, i); }
+  catch (e) { if (!(e.timeout || e.retry)) throw e; await pause(700); return tryRoute(url, i); }
+}
+async function getJson(url, direct) {
+  if (direct) return withRetry(url, -1);
+  let order = useRelay ? RELAYS.map((_, i) => i) : [-1, ...RELAYS.map((_, i) => i)];
+  if (route !== null && order.includes(route)) order = [route, ...order.filter(i => i !== route)];
+  let last;
+  for (const i of order) {
+    try { const v = await withRetry(url, i); route = i; if (i >= 0) relayUsed = true; return v; }
+    catch (e) {
+      last = e;
+      // the ad service itself answered with an error: a relay won't change that
+      if (i < 0 && !e.blocked && !e.timeout && !e.unreadable) throw e;
+    }
+  }
+  throw last;
 }
 const squash = t => String(t ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 /* One tidy name per store. The four built-in stores also match longer variants of their name. */
@@ -625,6 +663,7 @@ function makeDeal(raw, store, validFrom, validTo) {
   } else label = story || "See ad for price";
 
   return { store, name, unit_price: unit, price_label: label.trim(), sale_story: story,
+           per: measureOf(raw, name, unit, label, post),
            was: was !== null && price !== null && was > price ? was : null,
            valid_from: String(raw.valid_from || validFrom || ""),
            valid_to: String(raw.valid_to || validTo || ""),
@@ -633,6 +672,45 @@ function makeDeal(raw, store, validFrom, validTo) {
            cat: String(raw._L1 || raw.category || ""),
            _id: String(raw.flyer_item_id || raw.id || ""), _raw: raw, _rich: !!(pre || post || story),
            _text: [raw.name, raw.brand, raw.description].map(x => x || "").join(" ") };
+}
+
+/* ---- size: "16 oz", "6 pk 12 fl oz", "2 lb", "$2.99 lb" -> a price per ounce, fluid ounce or item */
+const SIZE_UNITS = { oz: ["wt", 1], ounce: ["wt", 1], ounces: ["wt", 1], lb: ["wt", 16], lbs: ["wt", 16], pound: ["wt", 16], pounds: ["wt", 16],
+  g: ["wt", 1 / 28.3495], kg: ["wt", 35.274], floz: ["vol", 1], gal: ["vol", 128], gallon: ["vol", 128], gallons: ["vol", 128],
+  qt: ["vol", 32], quart: ["vol", 32], quarts: ["vol", 32], pt: ["vol", 16], pint: ["vol", 16], pints: ["vol", 16],
+  l: ["vol", 33.814], liter: ["vol", 33.814], liters: ["vol", 33.814], litre: ["vol", 33.814], ml: ["vol", 0.033814],
+  ct: ["ct", 1], count: ["ct", 1] };
+const SIZE_RE = /(?:\b(\d+)\s*-?\s*(?:pk|pack|ct|count)\b[\s,\/x-]*)?\b(\d+(?:\.\d+)?)\s*-?\s*(fl\.?\s*oz|oz|ounces?|lbs?|pounds?|gal(?:lons?)?|qt|quarts?|pt|pints?|kg|g|ml|l|liters?|litres?|ct|count)\b/i;
+const PER_LB_RE = /\$\s*\d+(?:\.\d+)?\s*(?:\/\s*|per\s+)?(?:lb|lbs|pound)\b|^\s*(?:\/\s*|per\s+)?(?:lb|lbs|pound)\b/i;
+function fmtPer(kind, v) {
+  if (kind === "wt") return "$" + (v * 16).toFixed(2) + "/lb";
+  if (kind === "vol") return (v * 100).toFixed(1) + "\u00a2/fl oz";
+  return v < 1 ? (v * 100).toFixed(1) + "\u00a2 each" : "$" + v.toFixed(2) + " each";
+}
+function measureOf(raw, name, unit, label, post) {
+  if (unit === null || !(unit > 0)) return null;
+  if (PER_LB_RE.test(label) || PER_LB_RE.test(post))
+    return { kind: "wt", v: unit / 16, text: fmtPer("wt", unit / 16), fromLabel: true };
+  const text = [name, raw.description, post].map(x => String(x || "")).join(" ").replace(/\s+/g, " ");
+  if (/\d\s*(?:-|to)\s*\d+(?:\.\d+)?\s*(?:fl|oz|lb|ct|ounce|pound|count)|select sizes|assorted sizes|or larger/i.test(text)) return null;
+  const m = text.match(SIZE_RE);
+  if (!m) return null;
+  const u = SIZE_UNITS[m[3].toLowerCase().replace(/[\s.]/g, "")];
+  if (!u) return null;
+  const amount = parseFloat(m[2]) * u[1] * (m[1] ? +m[1] : 1);
+  if (!(amount > 0)) return null;
+  const v = unit / amount;
+  return { kind: u[0], v, text: fmtPer(u[0], v) };
+}
+/* Cheapest first. When every priced deal has a size of the same kind, the price per ounce (or per item) decides. */
+function perKind(list) {
+  const ks = new Set(list.filter(d => d.unit_price !== null).map(d => d.per ? d.per.kind : ""));
+  return ks.size === 1 && !ks.has("") ? [...ks][0] : null;
+}
+function sortDeals(list) {
+  const k = perKind(list);
+  const key = d => d.unit_price === null ? Infinity : k ? d.per.v : d.unit_price;
+  return list.sort((a, b) => (key(a) - key(b)) || a.name.localeCompare(b.name));
 }
 
 /* ------------------------------------------------ matching your list items */
@@ -671,6 +749,7 @@ const byPrice = (a, b) => (a.unit_price === null) - (b.unit_price === null)
 /* --------------------------------------------- reading the ads for a check */
 async function checkPrices(zip, queries, selected) {
   const sel = new Set(selected);
+  relayUsed = false;
   const warnings = [], deals = [], seen = new Set(), nearby = new Set(), status = {};
   const st = s => status[s] || (status[s] = { items: 0, valid_to: "" });
   let failed = 0, attempted = 0, blocked = 0;
@@ -736,15 +815,15 @@ async function checkPrices(zip, queries, selected) {
   await readFlyers(more);
 
   const embedded = typeof window !== "undefined" && window.top !== window.self;
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const why = " (" + [...details].join("; ") + ")";
   if (!deals.length && failed === attempted) {
-    warnings.push(embedded
+    warnings.push(offline ? "You're offline. Connect to the internet and check prices again." + why
+      : embedded
       ? "This page is running inside a preview, which can't reach the ad service. Download the file and open it directly in your browser (Chrome, Edge, Safari or Firefox)." + why
       : blocked
-        ? (useRelay ? "Couldn't reach the ad service through the relay either. Check your internet connection and try again in a few minutes." + why
-                    : "Your browser couldn't read the ad service (or you're offline). Open “Having trouble loading ads?” above, tick the relay option, and try again." + why)
-        : (useRelay ? "The relay returned errors for every lookup. Untick the relay option under “Having trouble loading ads?” and try again." + why
-                    : "The ad service returned errors for every lookup." + why));
+        ? "Couldn't reach the ad service, directly or through the backup relays. Check your internet connection and try again in a few minutes." + why
+        : "The ad service returned errors for every lookup. Try again in a few minutes." + why);
   } else if (fullAdsFailed) {
     warnings.push("Couldn't download every store's full ad, so some results come from the item search only and may miss a few deals." + why);
   }
@@ -770,7 +849,7 @@ async function checkPrices(zip, queries, selected) {
   };
   if (thin.length && await enrich(thin[0]))
     for (let i = 1; i < thin.length; i += 8) await Promise.all(thin.slice(i, i + 8).map(enrich));
-  results.forEach(r => Object.values(r.stores).forEach(l => l.sort(byPrice)));
+  results.forEach(r => Object.values(r.stores).forEach(sortDeals));
 
   return { results, deals, status, warnings, sample: sample ? { full_ad_entry: sample, entry_details: detail } : null, nearby: [...nearby].sort((a, b) => a.localeCompare(b)),
            failedCompletely: !deals.length && failed === attempted };
@@ -822,7 +901,7 @@ function view(results, items, selected) {
       if (!stores[s].length) delete stores[s];
     });
     const priced = Object.values(stores).map(l => l[0]).filter(d => d.unit_price !== null);
-    const best = priced.reduce((m, d) => (!m || d.unit_price < m.unit_price ? d : m), null);
+    const best = priced.length ? sortDeals(priced.slice())[0] : null;
     // more than one different product matches: ask which one, unless the shopper already chose
     const distinct = new Set(pool.map(d => d.name.toLowerCase())).size;
     const decided = !!it.any || (picked && it.done !== false);
@@ -903,7 +982,17 @@ if (typeof document !== "undefined") {
   const dot = st => `<i class="sdot" style="${scss(st)}" aria-hidden="true"></i>`;
   const tag = d => d.unit_price === null
     ? `<span class="tag none">${esc(d.price_label)}</span>`
-    : `<span class="tag${d.price_label.length > 9 ? " long" : ""}">${esc(d.price_label)}</span>`;
+    : `<span class="tag${d.price_label.length > 9 ? " long" : ""}">${esc(d.price_label)}${d.per && !d.per.fromLabel ? `<small class="per">${esc(d.per.text)}</small>` : ""}</span>`;
+  /* ---- sales ending within 3 days */
+  const endOf = s => { if (!s) return NaN; return Date.parse(s.length <= 10 ? s + "T23:59:59" : s); };
+  const endsSoon = d => {
+    const t = endOf(d && d.valid_to), left = t - Date.now();
+    if (!(left > 0) || left > 3 * 864e5) return "";
+    const end = new Date(t), today = new Date();
+    const same = end.toDateString() === today.toDateString();
+    return "Sale ends " + (same ? "today" : end.toLocaleDateString(undefined, { weekday: "short" }));
+  };
+  const endsHtml = d => { const t = endsSoon(d); return t ? `<span class="ends">${ic("calendar")}${esc(t)}</span>` : ""; };
   const pic = (d, cls) => `<button class="pic ${cls || ""}" ${d.image ? `data-zoom="${esc(d.image)}" data-cap="${esc(d.store + ": " + d.name)}" aria-label="Enlarge picture of ${esc(d.name)}"` : `tabindex="-1" aria-hidden="true"`}>${
     d.image ? `<img src="${esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</button>`;
 
@@ -959,7 +1048,7 @@ if (typeof document !== "undefined") {
     if (/\bcard\b|\bvic\b|\bmvp\b|digital|coupon|member|rewards|loyalty/.test(text)) out.push("Needs store card or coupon");
     if (r && r.best === d) {
       const c = compareOf(r, selectedStores()), others = c.priced.slice(1).map(x => x.d.unit_price).sort((a, b) => a - b);
-      if (!c.mixed && others.length >= 2 && d.unit_price < others[Math.floor(others.length / 2)] * 0.5) out.push("Much cheaper than other stores: check the size");
+      if (!c.mixed && !c.kind && others.length >= 2 && d.unit_price < others[Math.floor(others.length / 2)] * 0.5) out.push("Much cheaper than other stores: check the size");
       if (c.mixed)
         out.push(perLb ? "Other stores price it per item" : "Some stores price it per pound");
     }
@@ -1041,7 +1130,7 @@ if (typeof document !== "undefined") {
     STAPLES.filter(w => !listWords.has(w)).forEach(w => {
       if (out.length >= 12) return;
       const p = parseQuery(w);
-      const hits = deals.filter(d => ok(d) && matches(p, d)).sort(byPrice);
+      const hits = deals.filter(d => ok(d) && matches(p, d)); sortDeals(hits);
       if (hits.length >= 2) push(hits[0], `Lowest ${w} price`, 10);
     });
     return out.slice(0, 12).map(x => Object.assign({}, x.d, { why: x.why }));
@@ -1288,6 +1377,10 @@ if (typeof document !== "undefined") {
     }
     if (!state.items.length) { say("Add at least one item to your list first."); $("newItem").focus(); return; }
     if (!selectedStores().length) { say("Tick at least one store."); return; }
+    if (navigator.onLine === false) {
+      say(state.last && !state.last.failed ? "You're offline. Showing your last results; prices update when you're back online." : "You're offline. Connect to the internet to check prices.");
+      return;
+    }
     running = true; $("checkBtn").disabled = true; drawCheckHint();
     say(auto ? "Updating prices from this week's ads\u2026" : "Reading this week's ads\u2026 this takes a few seconds.");
     try {
@@ -1349,20 +1442,29 @@ if (typeof document !== "undefined") {
       const d = list.find(x => x.unit_price !== null) || null;
       return { store: s, d, has: list.length > 0 };
     });
-    const priced = rows.filter(x => x.d).sort((a, b) => a.d.unit_price - b.d.unit_price);
+    const k = perKind(rows.filter(x => x.d).map(x => x.d));
+    const val = d => k ? d.per.v : d.unit_price;
+    const priced = rows.filter(x => x.d).sort((a, b) => val(a.d) - val(b.d));
     const rest = rows.filter(x => !x.d);
     const best = priced[0] ? priced[0].d.unit_price : null;
-    priced.forEach(x => { x.diff = Math.round((x.d.unit_price - best) * 100) / 100; });
+    priced.forEach(x => { x.diff = Math.round((x.d.unit_price - best) * 100) / 100; x.val = val(x.d); });
     const next = priced[1] || null;
+    // different sizes at different stores: compare the price per pound, ounce or item, not the sticker price
+    const byValue = !!k && priced.length > 1 && new Set(priced.map(x => (x.d.unit_price / x.d.per.v).toFixed(2))).size > 1;
+    if (byValue) priced.forEach(x => { x.vdiff = fmtPer(k, x.val - priced[0].val); });
     // a per-pound price can't be weighed against a per-item price
     const perLb = d => /\blbs?\b|\/\s*lb|per\s+(?:lb|pound)/i.test(d.price_label || "");
-    const mixed = !!(next && perLb(priced[0].d) !== perLb(next.d));
-    return { priced, rest, next, mixed, save: next && !mixed ? next.diff : null };
+    const mixed = !k && !!(next && perLb(priced[0].d) !== perLb(next.d));
+    return { priced, rest, next, mixed, byValue, kind: k, save: next && !mixed && !byValue ? next.diff : null };
   }
   const money = n => "$" + n.toFixed(2);
   /* The newest week of ads starts on Wednesday for most stores. */
   function adsAreOld() {
     if (!state.last) return false;
+    if (Date.now() - state.last.when > 7 * 864e5) return true;
+    const st = state.last.status || {};
+    const ends = selectedStores().map(s => st[s] && st[s].items ? endOf(st[s].valid_to) : NaN).filter(isFinite);
+    if (ends.length) return ends.some(t => t < Date.now());
     const now = new Date(), wed = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() - 3 + 7) % 7));
     return state.last.when < wed.getTime();
   }
@@ -1410,7 +1512,7 @@ if (typeof document !== "undefined") {
     if (!tab) { $("shopList").innerHTML = `<p>Nothing to shop for yet.</p>`; return; }
     const todo = tab.list.filter(x => !state.got[x.key]), got = tab.list.filter(x => state.got[x.key]);
     const row = x => `<label class="shopitem${state.got[x.key] ? " got" : ""}"><input type="checkbox" data-got="${esc(x.key)}"${state.got[x.key] ? " checked" : ""}>
-      ${x.d ? pic(x.d, "thumb") : ""}<span class="what"><b>${esc(x.r.item)}</b><span class="soft">${x.d ? esc(x.d.name) : x.r.needsChoice ? "You haven't picked which one yet" : "Not on sale at your stores; buy wherever is handy"}</span></span>${x.d ? tag(x.d) : ""}</label>`;
+      ${x.d ? pic(x.d, "thumb") : ""}<span class="what"><b>${esc(x.r.item)}</b><span class="soft">${x.d ? esc(x.d.name) : x.r.needsChoice ? "You haven't picked which one yet" : "Not on sale at your stores; buy wherever is handy"}${x.d ? endsHtml(x.d) : ""}</span></span>${x.d ? tag(x.d) : ""}</label>`;
     $("shopList").innerHTML = (tab.id === "*" ? "" : `<p style="margin:4px 0 6px">${ic("store")}Buy these at ${chip(tab.label)}</p>`)
       + todo.map(row).join("")
       + (got.length ? `<p class="shopdone soft">In the cart</p>` + got.map(row).join("") : "")
@@ -1502,7 +1604,7 @@ if (typeof document !== "undefined") {
   }
   function productsOf(r) {
     const products = [];
-    r.pool.slice().sort(byPrice).forEach(d => {
+    sortDeals(r.pool.slice()).forEach(d => {
       let e = products.find(x => x.name === d.name);
       if (!e) products.push(e = { name: d.name, d, stores: new Set() });
       e.stores.add(d.store);
@@ -1629,9 +1731,10 @@ if (typeof document !== "undefined") {
       h += `<h3 class="narrow" style="${scss(st)}"><span class="sname">${dot(st)}${esc(st)}</span> <span>${plan[st].length} item${plan[st].length > 1 ? "s" : ""}</span></h3>` + plan[st].map(r => {
         const c = compareOf(r, sel);
         const vs = !c.next ? "Only store with this on sale" : c.mixed ? `Priced differently at ${esc(c.next.store)} (per pound vs each), so compare in the details`
+          : c.byValue ? `<b>Better value</b> than ${esc(c.next.store)} (${esc(c.priced[0].d.per.text)} vs ${esc(c.next.d.per.text)})`
           : c.save ? `<b>Saves ${money(c.save)}</b> vs ${esc(c.next.store)}` : `Same price at ${esc(c.next.store)}`;
         return `<div class="line">${pic(r.best, "thumb")}<div class="what"><b>${esc(r.item)}</b><span class="soft">${esc(r.best.name)}${r.picked ? " (your pick)" : r.anyOk ? " (any kind)" : ""}${r.picked || (r.anyOk && r.distinct >= 2) ? ` <button class="link noprint" data-askagain="${state.items.findIndex(i => i.q === r.item)}">${ic("swap")}Change</button>` : ""}</span>
-          <span class="vs">${vs} &middot; ${verify(r.best)}</span>${flagHtml(flagsOf(r.best, r))}</div>${tag(r.best)}</div>`;
+          <span class="vs">${vs} &middot; ${verify(r.best)}${endsSoon(r.best) ? " &middot; " + endsHtml(r.best) : ""}</span>${flagHtml(flagsOf(r.best, r))}</div>${tag(r.best)}</div>`;
       }).join("");
     });
     if (!Object.keys(plan).length) h += `<p style="margin:14px 0 0">${choose.length ? "Answer the question above and your plan appears here." : "None of your items has a sale price at the stores you ticked this week."}</p>`;
@@ -1687,7 +1790,7 @@ if (typeof document !== "undefined") {
     if (shown.length) h += `<h2 class="narrow sect noprint adv">Compare stores, item by item</h2>
       <p class="soft noprint adv" style="margin:0 0 6px">Tap an item to see every store's price, check the product, or pick the exact one you want.</p>`;
     rows.forEach((r, idx) => {
-      const offers = sel.flatMap(st => r.stores[st] || []).sort(byPrice);
+      const offers = sortDeals(sel.flatMap(st => r.stores[st] || []));
       if (r.pending || r.needsChoice || (!offers.length && !r.hidden)) return;
       const open = expanded.has(r.item), cap = 8;
       const products = productsOf(r);
@@ -1698,11 +1801,11 @@ if (typeof document !== "undefined") {
       // price by store: proof that the pick really is the lowest
       const c = compareOf(r, sel);
       if (c.priced.length > 1 || (c.priced.length && c.rest.length)) {
-        const top = c.priced.length ? c.priced[c.priced.length - 1].d.unit_price : 0;
-        h += `<div class="cmp"><p><b>Price at each store</b> <span class="soft">The lowest sale price each store has for this item.</span></p><div class="tablewrap"><table>` +
-          c.priced.map((x, i) => `<tr class="${i === 0 ? "best" : ""}"><td class="store">${dot(x.store)}${esc(x.store)}</td><td class="p">${esc(money(x.d.unit_price))}</td>
-            <td class="bar"><div class="barline" style="width:${top ? Math.max(6, Math.round(x.d.unit_price / top * 100)) : 100}%"></div></td>
-            <td class="diff">${i === 0 ? "Lowest" : "+" + money(x.diff)}</td><td class="nm">${esc(x.d.name)}${x.d.old ? " (last check)" : ""}</td></tr>`).join("") +
+        const top = c.priced.length ? c.priced[c.priced.length - 1].val : 0;
+        h += `<div class="cmp"><p><b>Price at each store</b> <span class="soft">${c.byValue ? "Sizes differ, so stores are ranked by price per " + (c.kind === "wt" ? "pound" : c.kind === "vol" ? "fluid ounce" : "item") + "." : "The lowest sale price each store has for this item."}</span></p><div class="tablewrap"><table>` +
+          c.priced.map((x, i) => `<tr class="${i === 0 ? "best" : ""}"><td class="store">${dot(x.store)}${esc(x.store)}</td><td class="p">${esc(money(x.d.unit_price))}${x.d.per && !x.d.per.fromLabel ? `<small class="per">${esc(x.d.per.text)}</small>` : ""}</td>
+            <td class="bar"><div class="barline" style="width:${top ? Math.max(6, Math.round(x.val / top * 100)) : 100}%"></div></td>
+            <td class="diff">${i === 0 ? (c.byValue ? "Best value" : "Lowest") : "+" + (c.byValue ? x.vdiff : money(x.diff))}</td><td class="nm">${esc(x.d.name)}${x.d.old ? " (last check)" : ""}</td></tr>`).join("") +
           c.rest.map(x => `<tr><td class="store">${dot(x.store)}${esc(x.store)}</td><td class="soft" colspan="4">${x.has ? "On sale, but the ad doesn't print a price" : "Not on sale this week"}</td></tr>`).join("") +
           `</table></div>` + (r.picked ? "" : `<p class="soft" style="margin:6px 0 0">Stores may be selling different brands or sizes. To compare the same product, tick it below.</p>`) + `</div>`;
       }
@@ -1847,7 +1950,8 @@ if (typeof document !== "undefined") {
       lines.push(s.toUpperCase());
       plan[s].forEach(r => {
         const c = compareOf(r, selectedStores());
-        const vs = !c.next || c.mixed ? "" : c.save ? ` - saves ${money(c.save)} vs ${c.next.store}` : ` - same at ${c.next.store}`;
+        const vs = !c.next || c.mixed ? "" : c.byValue ? ` - better value than ${c.next.store} (${c.priced[0].d.per.text} vs ${c.next.d.per.text})`
+          : c.save ? ` - saves ${money(c.save)} vs ${c.next.store}` : ` - same at ${c.next.store}`;
         lines.push(`- ${r.item}: ${r.best.price_label} (${r.best.name})${vs}`);
       });
       lines.push("");
@@ -1965,6 +2069,8 @@ if (typeof document !== "undefined") {
   };
   $("installNo").onclick = () => { try { localStorage.setItem("pantry.installNo", String(Date.now())); } catch (e) {} drawInstall(); };
   drawInstall();
+  window.addEventListener("online", () => { say("Back online."); scheduleAuto(500); });
+  window.addEventListener("offline", () => say(state.last && !state.last.failed ? "You're offline. Your list and last results still work." : "You're offline."));
   if (online && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
   applyView(); applySimple(); drawList(); drawStores(); draw(); readShared(); drawCheckHint();
