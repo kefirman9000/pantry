@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pantry</title>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#1E2A3B">
+<meta name="theme-color" content="#3B3F44">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Pantry">
@@ -14,12 +14,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
 <style>
-  :root { --paper:#F6F4EF; --card:#FFFFFF; --ink:#1B2230; --soft:#5B6472; --line:#DDD8CE;
-          --leaf:#2456C9; --leaf-ink:#FFFFFF; --band:#1E2A3B; --tag:#FFD83D; --tag-ink:#1B1A0F;
+  :root { --paper:#F2F3F5; --card:#FFFFFF; --ink:#1F2328; --soft:#5F6670; --line:#DADDE1;
+          --leaf:#2563EB; --leaf-ink:#FFFFFF; --band:#3B3F44; --tag:#FFD83D; --tag-ink:#1B1A0F;
           --hot:#D23B2A; --warn-bg:#FFF1C2; --warn:#6B4A00; }
   @media (prefers-color-scheme: dark) {
-    :root { --paper:#111419; --card:#1A1F27; --ink:#E9ECF1; --soft:#A0A9B6; --line:#2E3542;
-            --leaf:#7EA6FF; --leaf-ink:#0C1220; --band:#0F1724; --hot:#FF6B5E; --warn-bg:#3A3016; --warn:#F2CF7A; } }
+    :root { --paper:#16181B; --card:#1F2226; --ink:#ECEDEF; --soft:#A3A8AF; --line:#33373D;
+            --leaf:#6EA0FF; --leaf-ink:#0D1117; --band:#26292D; --hot:#FF6B5E; --warn-bg:#3A3016; --warn:#F2CF7A; } }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   html { font-size:100%; } html[data-size="1"] { font-size:112.5%; } html[data-size="2"] { font-size:128%; }
@@ -39,17 +39,17 @@
   .band { max-width:1200px; margin:0 auto; padding:18px 16px; display:flex; gap:14px 28px;
           flex-wrap:wrap; align-items:center; justify-content:space-between; }
   h1 { margin:0; font-size:2.1rem; line-height:1; }
-  header p { margin:4px 0 0; color:#C7D0DC; font-size:.95rem; }
+  header p { margin:4px 0 0; color:#D3D6DA; font-size:.95rem; }
   .go { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .go label { color:#C7D0DC; font-size:.9rem; }
-  #zip { width:170px; background:#fff; color:#1B2230; border-color:transparent; font-weight:600; }
+  .go label { color:#D3D6DA; font-size:.9rem; }
+  #zip { width:170px; background:#fff; color:#1F2328; border-color:transparent; font-weight:600; }
   #checkBtn { background:var(--tag); color:var(--tag-ink); border-color:var(--tag); font-weight:700; padding:10px 18px; }
   #places { max-width:1200px; margin:0 auto; padding:0 16px 12px; }
   #places p { margin:0 0 8px; font-weight:600; }
   #places .opts { display:flex; flex-wrap:wrap; gap:8px; }
-  #places button { background:#fff; color:#1B2230; border-color:#fff; text-align:left; line-height:1.25; }
-  #places button span { display:block; font-size:.82rem; color:#5B6472; }
-  #status { max-width:1200px; margin:0 auto; padding:0 16px 12px; color:#C7D0DC; font-size:.9rem; min-height:1.2em; }
+  #places button { background:#fff; color:#1F2328; border-color:#fff; text-align:left; line-height:1.25; }
+  #places button span { display:block; font-size:.82rem; color:#5F6670; }
+  #status { max-width:1200px; margin:0 auto; padding:0 16px 12px; color:#D3D6DA; font-size:.9rem; min-height:1.2em; }
 
   .layout { max-width:1200px; margin:0 auto; padding:22px 16px 60px; display:grid;
             grid-template-columns:310px minmax(0,1fr); gap:26px; align-items:start; }
@@ -94,7 +94,7 @@
 
   /* pictures from the ad */
   .pic { display:grid; place-items:center; background:#fff; border:1px solid var(--line); border-radius:6px;
-         padding:0; overflow:hidden; cursor:zoom-in; color:#8b93a0; font-size:.8rem; }
+         padding:0; overflow:hidden; cursor:zoom-in; color:#8f949b; font-size:.8rem; }
   .pic img { width:100%; height:100%; object-fit:contain; display:block; }
   .pic:empty { cursor:default; }
   .pic:empty::after { content:"No picture"; }
@@ -173,10 +173,10 @@
   .tablewrap { overflow-x:auto; }
   pre { white-space:pre-wrap; word-break:break-all; font-size:.78rem; background:var(--paper); padding:10px; border-radius:6px; }
 
-  dialog { border:0; border-radius:10px; padding:14px; max-width:min(92vw,640px); background:#fff; color:#1B2230; }
-  dialog::backdrop { background:rgba(12,16,24,.6); }
+  dialog { border:0; border-radius:10px; padding:14px; max-width:min(92vw,640px); background:#fff; color:#1F2328; }
+  dialog::backdrop { background:rgba(16,18,20,.6); }
   dialog img { max-width:100%; max-height:70vh; display:block; margin:0 auto 10px; }
-  dialog button { background:#fff; color:#1B2230; border-color:#d6d2c8; }
+  dialog button { background:#fff; color:#1F2328; border-color:#d4d7dc; }
 
   .undo { margin:8px 0 0; padding:8px 10px; border-radius:7px; background:var(--warn-bg); color:var(--warn); font-weight:600; }
   .undo button { color:inherit; font-weight:700; margin-left:6px; }
@@ -286,9 +286,9 @@
   /* header view controls */
   .view { display:flex; gap:6px; margin-top:8px; }
   .view button { background:transparent; color:#fff; border-color:rgba(255,255,255,.45); padding:4px 10px; font-size:.85rem; }
-  .view button[aria-pressed="true"] { background:#fff; color:#1B2230; }
+  .view button[aria-pressed="true"] { background:#fff; color:#1F2328; }
   #shareBar { max-width:1200px; margin:0 auto; padding:0 16px 12px; color:#fff; }
-  #shareBar .row button { background:#fff; color:#1B2230; border-color:#fff; }
+  #shareBar .row button { background:#fff; color:#1F2328; border-color:#fff; }
 
   /* quick add + paste */
   .staples { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; align-items:center; }
@@ -313,7 +313,7 @@
   .shopbar button { background:var(--tag); color:var(--tag-ink); border-color:var(--tag); font-weight:700; }
   .shoptabs { display:flex; gap:6px; overflow-x:auto; max-width:760px; margin:10px auto 0; padding-bottom:2px; }
   .shoptabs button { background:transparent; color:#fff; border-color:rgba(255,255,255,.45); white-space:nowrap; font-size:.95rem; }
-  .shoptabs button[aria-pressed="true"] { background:#fff; color:#1B2230; border-color:#fff; }
+  .shoptabs button[aria-pressed="true"] { background:#fff; color:#1F2328; border-color:#fff; }
   #shopList { max-width:760px; margin:0 auto; padding:12px 16px 60px; }
   .shopitem { display:flex; gap:12px; align-items:center; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
   .shopitem input { width:26px; height:26px; flex:none; accent-color:var(--leaf); }
@@ -460,7 +460,7 @@
     <li><b>At the store,</b> press “Start shopping” for a big checklist you can tick off.</li>
     <li><b>Double-check a price</b> with the “Check at store” link or by tapping the picture, which is the store's own ad.</li>
   </ul>
-  <p style="margin:0 0 12px;color:#5B6472;font-size:.9rem">Only sale prices from the weekly ads are shown, not every shelf price.</p>
+  <p style="margin:0 0 12px;color:#5F6670;font-size:.9rem">Only sale prices from the weekly ads are shown, not every shelf price.</p>
   <button id="helpClose">Got it</button>
 </dialog>
 <dialog id="zoom"><img alt=""><p id="zoomCap" style="margin:0 0 10px"></p><button id="zoomClose">Close</button></dialog>
